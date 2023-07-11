@@ -8,10 +8,12 @@ import (
 	"github.com/pion/webrtc/v3"
 	"net/http"
 	"time"
-	"webrtc-playground/internal/utils"
 )
 
-const N_OF_MESSAGES = 5
+const (
+	GOOGLE_STUN_ADDRESS = "stun:stun.l.google.com:19302"
+	N_OF_MESSAGES       = 5
+)
 
 func randSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -47,7 +49,7 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{utils.GOOGLE_STUN_ADDRESS},
+				URLs: []string{GOOGLE_STUN_ADDRESS},
 			},
 		},
 	}
@@ -73,7 +75,7 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
 
-			peer.Stop(fmt.Errorf("Peer Connection has gone to failed exiting\""))
+			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\""))
 		}
 	})
 
@@ -92,8 +94,12 @@ func (receiver *Peer) Await() error {
 	}
 }
 
-func (receiver *Peer) Stop(err error) {
+func (receiver *Peer) stop(err error) {
 	receiver.waitChannel <- err
+}
+
+func (receiver *Peer) Stop() {
+	receiver.stop(nil)
 }
 
 func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
@@ -124,7 +130,7 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if receiver.receivedMsgCnt == N_OF_MESSAGES {
 			fmt.Printf("Total of %v messages were sent, node should stop\n", N_OF_MESSAGES)
-			receiver.Stop(nil)
+			receiver.stop(nil)
 		}
 		fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
 		receiver.receivedMsgCnt++
