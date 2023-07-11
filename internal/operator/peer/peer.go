@@ -7,8 +7,8 @@ import (
 	"github.com/pion/randutil"
 	"github.com/pion/webrtc/v3"
 	"net/http"
-	"os"
 	"time"
+	"webrtc-playground/internal/utils"
 )
 
 const N_OF_MESSAGES = 5
@@ -38,7 +38,7 @@ type Peer struct {
 	CoordinatorAddress string
 	CoordinatorPort    int
 	PeerConnection     *webrtc.PeerConnection
-	waitChannel        chan bool
+	waitChannel        chan error
 	sentMsgCnt         int
 	receivedMsgCnt     int
 }
@@ -47,13 +47,20 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
+				URLs: []string{utils.GOOGLE_STUN_ADDRESS},
 			},
 		},
 	}
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err == nil {
 		return
+	}
+
+	peer = &Peer{
+		CoordinatorAddress: coordinatorAddress,
+		CoordinatorPort:    coordinatorPort,
+		PeerConnection:     peerConnection,
+		waitChannel:        make(chan error),
 	}
 
 	// Set the handler for Peer connection state
@@ -65,8 +72,8 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-			fmt.Println("Peer Connection has gone to failed exiting")
-			os.Exit(0)
+
+			peer.Stop(fmt.Errorf("Peer Connection has gone to failed exiting\""))
 		}
 	})
 
@@ -74,24 +81,19 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 		peer.onDataChannel(channel)
 	})
 
-	return &Peer{
-		CoordinatorAddress: coordinatorAddress,
-		CoordinatorPort:    coordinatorPort,
-		PeerConnection:     peerConnection,
-		waitChannel:        make(chan bool),
-	}, nil
+	return
 }
 
-func (receiver *Peer) Await() {
+func (receiver *Peer) Await() error {
 	fmt.Printf("Waiting to stop\n")
 	select {
-	case val := <-receiver.waitChannel:
-		fmt.Printf("Peer was successful: %v\n", val)
+	case err := <-receiver.waitChannel:
+		return err
 	}
 }
 
-func (receiver *Peer) Stop(val bool) {
-	receiver.waitChannel <- val
+func (receiver *Peer) Stop(err error) {
+	receiver.waitChannel <- err
 }
 
 func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
@@ -122,7 +124,7 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if receiver.receivedMsgCnt == N_OF_MESSAGES {
 			fmt.Printf("Total of %v messages were sent, node should stop\n", N_OF_MESSAGES)
-			receiver.Stop(true)
+			receiver.Stop(nil)
 		}
 		fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
 		receiver.receivedMsgCnt++
