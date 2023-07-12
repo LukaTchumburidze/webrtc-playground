@@ -1,12 +1,9 @@
 package peer
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/pion/randutil"
 	"github.com/pion/webrtc/v3"
-	"net/http"
 	"time"
 )
 
@@ -22,18 +19,6 @@ func randSeq(n int) string {
 	}
 
 	return val
-}
-
-// TODO: Leftovers from pion example, might change later
-func signalCandidate(addr string, c *webrtc.ICECandidate) error {
-	payload := []byte(c.ToJSON().Candidate)
-	resp, err := http.Post(fmt.Sprintf("http://%s/candidate", addr), // nolint:noctx
-		"application/json; charset=utf-8", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-
-	return resp.Body.Close()
 }
 
 type Peer struct {
@@ -140,26 +125,9 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 func (receiver *Peer) InitConnection() error {
 	//Init connection with coordinator
 
-	// Create an offer to send to the other process
-	offer, err := receiver.PeerConnection.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-	if err = receiver.PeerConnection.SetLocalDescription(offer); err != nil {
-		return err
-	}
-
-	// Send our offer to the HTTP server listening in the other process
-	payload, err := json.Marshal(offer)
-	if err != nil {
-		panic(err)
-	}
-	resp, err := http.Post(fmt.Sprintf("http://%s:%d/sdp", receiver.CoordinatorAddress, receiver.CoordinatorPort), "application/json; charset=utf-8", bytes.NewReader(payload)) // nolint:noctx
-	if err != nil {
-		panic(err)
-	} else if err := resp.Body.Close(); err != nil {
-		panic(err)
-	}
+	// TODO: use coordinator to get role (offer/answer)
+	// TODO: send our SDP and receive other peer's SDP
+	// TODO: finish registration
 
 	return nil
 }
