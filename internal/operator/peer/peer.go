@@ -1,16 +1,22 @@
 package peer
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/pion/randutil"
 	"github.com/pion/webrtc/v3"
+	"net/http"
+	"os"
 	"time"
+	"webrtc-playground/internal/operator/coordinator"
 )
 
-const (
-	GOOGLE_STUN_ADDRESS = "stun:stun.l.google.com:19302"
-	N_OF_MESSAGES       = 5
-)
+const N_OF_MESSAGES = 5
+const BUSY_TIMEOUT = 20 * time.Second
+const DELAY_AFTER_OFFER = 10 * time.Second
+const DELAY_BEFORE_ANSWER = 10 * time.Second
+const TYPE_APP_JSON = "application/json; charset=utf-8"
 
 func randSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -21,11 +27,23 @@ func randSeq(n int) string {
 	return val
 }
 
+// TODO: Leftovers from pion example, might change later
+func signalCandidate(addr string, c *webrtc.ICECandidate) error {
+	payload := []byte(c.ToJSON().Candidate)
+	resp, err := http.Post(fmt.Sprintf("http://%s/candidate", addr), // nolint:noctx
+		"application/json; charset=utf-8", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+
+	return resp.Body.Close()
+}
+
 type Peer struct {
 	CoordinatorAddress string
 	CoordinatorPort    int
 	PeerConnection     *webrtc.PeerConnection
-	waitChannel        chan error
+	waitChannel        chan bool
 	sentMsgCnt         int
 	receivedMsgCnt     int
 }
@@ -34,20 +52,13 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{GOOGLE_STUN_ADDRESS},
+				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
 	}
 	peerConnection, err := webrtc.NewPeerConnection(config)
 	if err == nil {
 		return
-	}
-
-	peer = &Peer{
-		CoordinatorAddress: coordinatorAddress,
-		CoordinatorPort:    coordinatorPort,
-		PeerConnection:     peerConnection,
-		waitChannel:        make(chan error),
 	}
 
 	// Set the handler for Peer connection state
@@ -59,8 +70,8 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-
-			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\""))
+			fmt.Println("Peer Connection has gone to failed exiting")
+			os.Exit(0)
 		}
 	})
 
@@ -68,23 +79,24 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 		peer.onDataChannel(channel)
 	})
 
-	return
+	return &Peer{
+		CoordinatorAddress: coordinatorAddress,
+		CoordinatorPort:    coordinatorPort,
+		PeerConnection:     peerConnection,
+		waitChannel:        make(chan bool),
+	}, nil
 }
 
-func (receiver *Peer) Await() error {
+func (receiver *Peer) Await() {
 	fmt.Printf("Waiting to stop\n")
 	select {
-	case err := <-receiver.waitChannel:
-		return err
+	case val := <-receiver.waitChannel:
+		fmt.Printf("Peer was successful: %v\n", val)
 	}
 }
 
-func (receiver *Peer) stop(err error) {
-	receiver.waitChannel <- err
-}
-
-func (receiver *Peer) Stop() {
-	receiver.stop(nil)
+func (receiver *Peer) Stop(val bool) {
+	receiver.waitChannel <- val
 }
 
 func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
@@ -115,7 +127,7 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if receiver.receivedMsgCnt == N_OF_MESSAGES {
 			fmt.Printf("Total of %v messages were sent, node should stop\n", N_OF_MESSAGES)
-			receiver.stop(nil)
+			receiver.Stop(true)
 		}
 		fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
 		receiver.receivedMsgCnt++
@@ -125,10 +137,133 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 func (receiver *Peer) InitConnection() error {
 	//Init connection with coordinator
 
-	// TODO: use coordinator to get role (offer/answer)
-	// TODO: send our SDP and receive other peer's SDP
-	// TODO: finish registration
+	status := coordinator.StatusStruct{Status: coordinator.STATUS_BUSY}
 
+	// TODO: use coordinator to get role (offer/answer)
+	for status.Status == coordinator.STATUS_BUSY {
+		resp, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader([]byte{}))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sleeping for %d nanos", status.Status, BUSY_TIMEOUT)
+	}
+
+	offer, err := receiver.PeerConnection.CreateOffer(nil)
+	if err != nil {
+		fmt.Fprint(os.Stderr, err)
+		return err
+	}
+	payload, err := json.Marshal(offer)
+	if err != nil {
+		fmt.Fprint(os.Stderr, err)
+		return err
+	}
+
+	switch status.Status {
+	case coordinator.ROLE_OFFER:
+		// SEND offer role
+		fmt.Printf("Sending Offer SDP\n")
+		_, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader(payload))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		if err = receiver.PeerConnection.SetLocalDescription(offer); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sleping after offer\n")
+		time.Sleep(DELAY_AFTER_OFFER)
+
+		// RECEIVE answer connection
+		fmt.Printf("Getting answer SDP\n")
+		resp, err := http.Get(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		var answerSdp webrtc.SessionDescription
+		err = json.NewDecoder(resp.Body).Decode(&answerSdp)
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = receiver.PeerConnection.SetRemoteDescription(answerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+	case coordinator.ROLE_ANSWER:
+		//fmt.Printf("Sleping before answer\n")
+		//time.Sleep(DELAY_BEFORE_ANSWER)
+		// Receive offer
+		fmt.Printf("Getting offer SDP\n")
+		resp, err := http.Get(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		var offerSdp webrtc.SessionDescription
+		err = json.NewDecoder(resp.Body).Decode(&offerSdp)
+
+		err = receiver.PeerConnection.SetRemoteDescription(offerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		answerSdp, err := receiver.PeerConnection.CreateAnswer(nil)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = receiver.PeerConnection.SetLocalDescription(answerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sending answer SDP\n")
+		_, err = http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader(payload))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+	}
+
+	_, err = http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH),
+		TYPE_APP_JSON,
+		bytes.NewReader([]byte{}))
+	if err != nil {
+		fmt.Fprint(os.Stderr, err)
+		return err
+	}
+
+	fmt.Printf("Peer with role %v done", status.Status)
 	return nil
 }
 
