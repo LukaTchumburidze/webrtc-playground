@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"time"
+	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/operator/peer"
 )
 
@@ -15,7 +16,6 @@ const (
 func main() {
 	var nodeType string
 	var coordAddress string
-	port := flag.Int("port", -1, "Port on which application should run (only needed to coord type)")
 	coordPort := flag.Int("coordinator_port", -1, "Port on which coordinator runs, mandatory field")
 	flag.StringVar(&nodeType, "node_type", "", "Determines which logic should node enforce, mandatory field")
 	flag.StringVar(&coordAddress, "coordinator_address", "", "Address for coordinator node, mandatory field")
@@ -44,7 +44,10 @@ func main() {
 
 		peerNode.Await()
 	case NODE_TYPE_COORD:
-		//TODO: Coord functionality
-		*port++
+		coordNode, err := coordinator.New(*coordPort)
+		if err != nil {
+			panic(err)
+		}
+		coordNode.Listen()
 	}
 }
