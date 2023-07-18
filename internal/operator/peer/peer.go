@@ -27,18 +27,6 @@ func randSeq(n int) string {
 	return val
 }
 
-// TODO: Leftovers from pion example, might change later
-func signalCandidate(addr string, c *webrtc.ICECandidate) error {
-	payload := []byte(c.ToJSON().Candidate)
-	resp, err := http.Post(fmt.Sprintf("http://%s/candidate", addr), // nolint:noctx
-		"application/json; charset=utf-8", bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-
-	return resp.Body.Close()
-}
-
 type Peer struct {
 	CoordinatorAddress string
 	CoordinatorPort    int
@@ -139,7 +127,6 @@ func (receiver *Peer) InitConnection() error {
 
 	status := coordinator.StatusStruct{Status: coordinator.STATUS_BUSY}
 
-	// TODO: use coordinator to get role (offer/answer)
 	for status.Status == coordinator.STATUS_BUSY {
 		resp, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH),
 			TYPE_APP_JSON,
