@@ -9,9 +9,14 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"webrtc-playground/internal/operator/coordinator"
 )
 
 const N_OF_MESSAGES = 5
+const BUSY_TIMEOUT = 20 * time.Second
+const DELAY_AFTER_OFFER = 10 * time.Second
+const DELAY_BEFORE_ANSWER = 10 * time.Second
+const TYPE_APP_JSON = "application/json; charset=utf-8"
 
 func randSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -132,27 +137,133 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 func (receiver *Peer) InitConnection() error {
 	//Init connection with coordinator
 
-	// Create an offer to send to the other process
+	status := coordinator.StatusStruct{Status: coordinator.STATUS_BUSY}
+
+	// TODO: use coordinator to get role (offer/answer)
+	for status.Status == coordinator.STATUS_BUSY {
+		resp, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader([]byte{}))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sleeping for %d nanos", status.Status, BUSY_TIMEOUT)
+	}
+
 	offer, err := receiver.PeerConnection.CreateOffer(nil)
 	if err != nil {
+		fmt.Fprint(os.Stderr, err)
 		return err
 	}
-	if err = receiver.PeerConnection.SetLocalDescription(offer); err != nil {
-		return err
-	}
-
-	// Send our offer to the HTTP server listening in the other process
 	payload, err := json.Marshal(offer)
 	if err != nil {
-		panic(err)
-	}
-	resp, err := http.Post(fmt.Sprintf("http://%s:%d/sdp", receiver.CoordinatorAddress, receiver.CoordinatorPort), "application/json; charset=utf-8", bytes.NewReader(payload)) // nolint:noctx
-	if err != nil {
-		panic(err)
-	} else if err := resp.Body.Close(); err != nil {
-		panic(err)
+		fmt.Fprint(os.Stderr, err)
+		return err
 	}
 
+	switch status.Status {
+	case coordinator.ROLE_OFFER:
+		// SEND offer role
+		fmt.Printf("Sending Offer SDP\n")
+		_, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader(payload))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		if err = receiver.PeerConnection.SetLocalDescription(offer); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sleping after offer\n")
+		time.Sleep(DELAY_AFTER_OFFER)
+
+		// RECEIVE answer connection
+		fmt.Printf("Getting answer SDP\n")
+		resp, err := http.Get(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		var answerSdp webrtc.SessionDescription
+		err = json.NewDecoder(resp.Body).Decode(&answerSdp)
+		if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = receiver.PeerConnection.SetRemoteDescription(answerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+	case coordinator.ROLE_ANSWER:
+		//fmt.Printf("Sleping before answer\n")
+		//time.Sleep(DELAY_BEFORE_ANSWER)
+		// Receive offer
+		fmt.Printf("Getting offer SDP\n")
+		resp, err := http.Get(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		} else if err := resp.Body.Close(); err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		var offerSdp webrtc.SessionDescription
+		err = json.NewDecoder(resp.Body).Decode(&offerSdp)
+
+		err = receiver.PeerConnection.SetRemoteDescription(offerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		answerSdp, err := receiver.PeerConnection.CreateAnswer(nil)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+		err = receiver.PeerConnection.SetLocalDescription(answerSdp)
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+
+		fmt.Printf("Sending answer SDP\n")
+		_, err = http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH),
+			TYPE_APP_JSON,
+			bytes.NewReader(payload))
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			return err
+		}
+	}
+
+	_, err = http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH),
+		TYPE_APP_JSON,
+		bytes.NewReader([]byte{}))
+	if err != nil {
+		fmt.Fprint(os.Stderr, err)
+		return err
+	}
+
+	fmt.Printf("Peer with role %v done", status.Status)
 	return nil
 }
 

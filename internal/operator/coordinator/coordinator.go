@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/pion/webrtc/v3"
@@ -17,7 +18,18 @@ const (
 
 	HTTP_GET  = "GET"
 	HTTP_POST = "POST"
+
+	HTTP_REGISTER_PATH      = "/register"
+	HTTP_SDP_OFFER_PATH     = "/sdp/offer"
+	HTTP_SDP_ANSWER_PATH    = "/sdp/answer"
+	HTTP_REGISTER_DONE_PATH = "/register/done"
+
+	MATCHING_TIMEOUT = 60 * time.Second
 )
+
+type StatusStruct struct {
+	Status string
+}
 
 // TODO: Right now ICE candidates optimization is fully removed, might add later
 
@@ -27,6 +39,7 @@ type Coordinator struct {
 	answers      []*webrtc.SessionDescription
 	candidates   [][]webrtc.ICECandidate // TODO: Maybe use it, maybe not
 	isBusy       bool
+	doneCnt      int
 	peersMux     sync.Mutex
 	awaitChannel chan bool
 }
@@ -47,36 +60,54 @@ func New(port int) (*Coordinator, error) {
 }
 
 func (receiver *Coordinator) handleRegister() {
-	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HTTP_REGISTER_PATH, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
 		if receiver.isBusy {
-			_, err := w.Write([]byte(STATUS_BUSY))
+			buff := bytes.Buffer{}
+			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: STATUS_BUSY})
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
+				return
+			}
+			_, err = w.Write(buff.Bytes())
+			if err != nil {
+				fmt.Fprint(os.Stderr, err)
+				return
 			}
 
 			return
 		}
 
 		if len(receiver.offers) == len(receiver.answers) {
-			receiver.offers = append(receiver.offers, nil)
-			_, err := w.Write([]byte(ROLE_OFFER))
+			buff := bytes.Buffer{}
+			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: ROLE_OFFER})
 			if err != nil {
-				if err != nil {
-					fmt.Fprint(os.Stderr, err)
-				}
+				fmt.Fprint(os.Stderr, err)
+				return
 			}
-		} else {
-			receiver.answers = append(receiver.answers, nil)
-			_, err := w.Write([]byte(ROLE_ANSWER))
+			_, err = w.Write(buff.Bytes())
 			if err != nil {
-				if err != nil {
-					fmt.Fprint(os.Stderr, err)
-				}
+				fmt.Fprint(os.Stderr, err)
+				return
 			}
 
+			receiver.offers = append(receiver.offers, nil)
+		} else {
+			buff := bytes.Buffer{}
+			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: ROLE_ANSWER})
+			if err != nil {
+				fmt.Fprint(os.Stderr, err)
+				return
+			}
+			_, err = w.Write(buff.Bytes())
+			if err != nil {
+				fmt.Fprint(os.Stderr, err)
+				return
+			}
+
+			receiver.answers = append(receiver.answers, nil)
 			receiver.isBusy = true
 
 			go func() {
@@ -84,7 +115,7 @@ func (receiver *Coordinator) handleRegister() {
 				defer receiver.peersMux.Unlock()
 
 				oldLen := len(receiver.offers)
-				time.Sleep(30 * time.Second)
+				time.Sleep(MATCHING_TIMEOUT)
 
 				if len(receiver.offers) == oldLen &&
 					(receiver.offers[oldLen-1] == nil ||
@@ -100,13 +131,21 @@ func (receiver *Coordinator) handleRegister() {
 	})
 
 	// Should be called by offer peer once it retrieves answer's SDP
-	http.HandleFunc("/register/done", func(w http.ResponseWriter, r *http.Request) {
-		receiver.isBusy = false
+	http.HandleFunc(HTTP_REGISTER_DONE_PATH, func(w http.ResponseWriter, r *http.Request) {
+		receiver.peersMux.Lock()
+		defer receiver.peersMux.Unlock()
+
+		fmt.Printf("Done received from %v", r.RemoteAddr)
+		receiver.doneCnt++
+		if receiver.doneCnt == 2 {
+			receiver.doneCnt = 0
+			receiver.isBusy = false
+		}
 	})
 }
 
 func (receiver *Coordinator) handleSdp() {
-	http.HandleFunc("/sdp/offer", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HTTP_SDP_OFFER_PATH, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -116,6 +155,7 @@ func (receiver *Coordinator) handleSdp() {
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
 				fmt.Fprint(os.Stderr, err)
+				return
 			}
 			fmt.Printf("Received SDP from offer peer %v\n", sdp)
 			receiver.offers[len(receiver.offers)-1] = &sdp
@@ -124,12 +164,13 @@ func (receiver *Coordinator) handleSdp() {
 			sdp := receiver.offers[len(receiver.offers)-1]
 			if err := json.NewEncoder(w).Encode(sdp); err != nil {
 				fmt.Fprint(os.Stderr, err)
+				return
 			}
 			fmt.Printf("Sending SDP to answer peer %v\n", sdp)
 		}
 	})
 
-	http.HandleFunc("/sdp/answer", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HTTP_SDP_ANSWER_PATH, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -139,6 +180,7 @@ func (receiver *Coordinator) handleSdp() {
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
 				fmt.Fprint(os.Stderr, err)
+				return
 			}
 			fmt.Printf("Received SDP from answer peer %v\n", sdp)
 			receiver.answers[len(receiver.answers)-1] = &sdp
@@ -147,6 +189,7 @@ func (receiver *Coordinator) handleSdp() {
 			sdp := receiver.answers[len(receiver.answers)-1]
 			if err := json.NewEncoder(w).Encode(receiver.answers[len(receiver.answers)-1]); err != nil {
 				fmt.Fprint(os.Stderr, err)
+				return
 			}
 			fmt.Printf("Sending SDP to offer peer %v\n", sdp)
 		}
