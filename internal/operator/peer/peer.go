@@ -31,7 +31,7 @@ type Peer struct {
 	CoordinatorAddress string
 	CoordinatorPort    int
 	PeerConnection     *webrtc.PeerConnection
-	waitChannel        chan bool
+	waitChannel        chan error
 	sentMsgCnt         int
 	receivedMsgCnt     int
 }
@@ -49,6 +49,13 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 		return
 	}
 
+	peer = &Peer{
+		CoordinatorAddress: coordinatorAddress,
+		CoordinatorPort:    coordinatorPort,
+		PeerConnection:     peerConnection,
+		waitChannel:        make(chan error),
+	}
+
 	// Set the handler for Peer connection state
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
@@ -58,8 +65,8 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-			fmt.Println("Peer Connection has gone to failed exiting")
-			os.Exit(0)
+
+			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\""))
 		}
 	})
 
@@ -67,24 +74,23 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 		peer.onDataChannel(channel)
 	})
 
-	return &Peer{
-		CoordinatorAddress: coordinatorAddress,
-		CoordinatorPort:    coordinatorPort,
-		PeerConnection:     peerConnection,
-		waitChannel:        make(chan bool),
-	}, nil
+	return
 }
 
-func (receiver *Peer) Await() {
+func (receiver *Peer) Await() error {
 	fmt.Printf("Waiting to stop\n")
 	select {
-	case val := <-receiver.waitChannel:
-		fmt.Printf("Peer was successful: %v\n", val)
+	case err := <-receiver.waitChannel:
+		return err
 	}
 }
 
-func (receiver *Peer) Stop(val bool) {
-	receiver.waitChannel <- val
+func (receiver *Peer) stop(err error) {
+	receiver.waitChannel <- err
+}
+
+func (receiver *Peer) Stop() {
+	receiver.stop(nil)
 }
 
 func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
@@ -115,7 +121,7 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
 		if receiver.receivedMsgCnt == N_OF_MESSAGES {
 			fmt.Printf("Total of %v messages were sent, node should stop\n", N_OF_MESSAGES)
-			receiver.Stop(true)
+			receiver.stop(nil)
 		}
 		fmt.Printf("Message from DataChannel '%s': '%s'\n", d.Label(), string(msg.Data))
 		receiver.receivedMsgCnt++
@@ -125,6 +131,9 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 func (receiver *Peer) InitConnection() error {
 	//Init connection with coordinator
 
+	// TODO: use coordinator to get role (offer/answer)
+	// TODO: send our SDP and receive other peer's SDP
+	// TODO: finish registration
 	status := coordinator.Status(coordinator.STATUS_BUSY)
 
 	for status == coordinator.STATUS_BUSY {

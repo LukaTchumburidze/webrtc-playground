@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"time"
 	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/operator/peer"
@@ -20,11 +21,11 @@ func main() {
 	flag.StringVar(&nodeType, "node_type", "", "Determines which logic should node enforce, mandatory field")
 	flag.StringVar(&coordAddress, "coordinator_address", "", "Address for coordinator node, mandatory field")
 
-	if nodeType == "" || coordAddress == "" || *coordPort == -1 {
-		panic(fmt.Errorf("Mandatory fields were missing, please check -h"))
-	}
-
 	flag.Parse()
+	if nodeType == "" || coordAddress == "" || *coordPort == -1 {
+		fmt.Fprintf(os.Stderr, "Mandatory fields were missing, please check -h")
+		os.Exit(1)
+	}
 
 	switch nodeType {
 	case NODE_TYPE_PEER:
@@ -33,16 +34,23 @@ func main() {
 
 		peerNode, err := peer.New(coordAddress, *coordPort)
 		if err != nil {
-			panic(err)
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
 		}
 		err = peerNode.InitConnection()
 		if err != nil {
-			panic(err)
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
 		}
 		peerNode.SendData()
-		peerNode.Await()
 
-		peerNode.Await()
+		err = peerNode.Await()
+		if err != nil {
+			fmt.Fprint(os.Stderr, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("Peer Node completed successfully")
 	case NODE_TYPE_COORD:
 		coordNode, err := coordinator.New(*coordPort)
 		if err != nil {
