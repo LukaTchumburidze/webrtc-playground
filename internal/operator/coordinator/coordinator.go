@@ -12,12 +12,9 @@ import (
 )
 
 const (
-	STATUS_BUSY = "BUSY"
-	ROLE_OFFER  = "OFFER"
-	ROLE_ANSWER = "ANSWER"
-
-	HTTP_GET  = "GET"
-	HTTP_POST = "POST"
+	STATUS_BUSY = Status("BUSY")
+	ROLE_OFFER  = Status("OFFER")
+	ROLE_ANSWER = Status("ANSWER")
 
 	HTTP_REGISTER_PATH      = "/register"
 	HTTP_SDP_OFFER_PATH     = "/sdp/offer"
@@ -27,9 +24,7 @@ const (
 	MATCHING_TIMEOUT = 60 * time.Second
 )
 
-type StatusStruct struct {
-	Status string
-}
+type Status string
 
 // TODO: Right now ICE candidates optimization is fully removed, might add later
 
@@ -66,7 +61,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if receiver.isBusy {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: STATUS_BUSY})
+			err := json.NewEncoder(&buff).Encode(Status(STATUS_BUSY))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -82,7 +77,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if len(receiver.offers) == len(receiver.answers) {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: ROLE_OFFER})
+			err := json.NewEncoder(&buff).Encode(Status(ROLE_OFFER))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -96,7 +91,7 @@ func (receiver *Coordinator) handleRegister() {
 			receiver.offers = append(receiver.offers, nil)
 		} else {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(StatusStruct{Status: ROLE_ANSWER})
+			err := json.NewEncoder(&buff).Encode(Status(ROLE_ANSWER))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -110,23 +105,7 @@ func (receiver *Coordinator) handleRegister() {
 			receiver.answers = append(receiver.answers, nil)
 			receiver.isBusy = true
 
-			go func() {
-				receiver.peersMux.Lock()
-				defer receiver.peersMux.Unlock()
-
-				oldLen := len(receiver.offers)
-				time.Sleep(MATCHING_TIMEOUT)
-
-				if len(receiver.offers) == oldLen &&
-					(receiver.offers[oldLen-1] == nil ||
-						receiver.answers[oldLen-1] == nil) {
-					fmt.Printf("After timeout both peers wasn't registered, removing last 2 records from offers/answers")
-
-					receiver.offers = receiver.offers[:oldLen-1]
-					receiver.answers = receiver.answers[:oldLen-1]
-					receiver.isBusy = false
-				}
-			}()
+			go receiver.resetBusyState()
 		}
 	})
 
@@ -144,13 +123,35 @@ func (receiver *Coordinator) handleRegister() {
 	})
 }
 
+func (receiver *Coordinator) resetBusyState() {
+	receiver.peersMux.Lock()
+	defer receiver.peersMux.Unlock()
+
+	oldLen := len(receiver.offers)
+	time.Sleep(MATCHING_TIMEOUT)
+
+	if len(receiver.offers) == oldLen &&
+		(receiver.offers[oldLen-1] == nil ||
+			receiver.answers[oldLen-1] == nil) {
+		fmt.Printf("After timeout both peers wasn't registered, removing last 2 records from offers/answers")
+
+		receiver.offers = receiver.offers[:oldLen-1]
+		receiver.answers = receiver.answers[:oldLen-1]
+		receiver.isBusy = false
+	}
+}
+
+func resetBusyState() {
+
+}
+
 func (receiver *Coordinator) handleSdp() {
 	http.HandleFunc(HTTP_SDP_OFFER_PATH, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
 		switch r.Method {
-		case HTTP_POST:
+		case http.MethodPost:
 			// Offer giving us SDP
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
@@ -159,7 +160,7 @@ func (receiver *Coordinator) handleSdp() {
 			}
 			fmt.Printf("Received SDP from offer peer %v\n", sdp)
 			receiver.offers[len(receiver.offers)-1] = &sdp
-		case HTTP_GET:
+		case http.MethodGet:
 			// Answer asking for offer's SDP
 			sdp := receiver.offers[len(receiver.offers)-1]
 			if err := json.NewEncoder(w).Encode(sdp); err != nil {
@@ -175,7 +176,7 @@ func (receiver *Coordinator) handleSdp() {
 		defer receiver.peersMux.Unlock()
 
 		switch r.Method {
-		case HTTP_POST:
+		case http.MethodPost:
 			// Answer giving us SDP
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
@@ -184,7 +185,7 @@ func (receiver *Coordinator) handleSdp() {
 			}
 			fmt.Printf("Received SDP from answer peer %v\n", sdp)
 			receiver.answers[len(receiver.answers)-1] = &sdp
-		case HTTP_GET:
+		case http.MethodGet:
 			// Offer asking for Answer's SDP
 			sdp := receiver.answers[len(receiver.answers)-1]
 			if err := json.NewEncoder(w).Encode(receiver.answers[len(receiver.answers)-1]); err != nil {

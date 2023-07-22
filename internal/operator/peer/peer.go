@@ -125,9 +125,9 @@ func (receiver *Peer) onDataChannel(d *webrtc.DataChannel) {
 func (receiver *Peer) InitConnection() error {
 	//Init connection with coordinator
 
-	status := coordinator.StatusStruct{Status: coordinator.STATUS_BUSY}
+	status := coordinator.Status(coordinator.STATUS_BUSY)
 
-	for status.Status == coordinator.STATUS_BUSY {
+	for status == coordinator.STATUS_BUSY {
 		resp, err := http.Post(fmt.Sprint("%s:%d%s", receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH),
 			TYPE_APP_JSON,
 			bytes.NewReader([]byte{}))
@@ -144,7 +144,7 @@ func (receiver *Peer) InitConnection() error {
 			return err
 		}
 
-		fmt.Printf("Sleeping for %d nanos", status.Status, BUSY_TIMEOUT)
+		fmt.Printf("Sleeping for %d nanos", status, BUSY_TIMEOUT)
 	}
 
 	offer, err := receiver.PeerConnection.CreateOffer(nil)
@@ -158,7 +158,7 @@ func (receiver *Peer) InitConnection() error {
 		return err
 	}
 
-	switch status.Status {
+	switch status {
 	case coordinator.ROLE_OFFER:
 		// SEND offer role
 		fmt.Printf("Sending Offer SDP\n")
@@ -250,7 +250,7 @@ func (receiver *Peer) InitConnection() error {
 		return err
 	}
 
-	fmt.Printf("Peer with role %v done", status.Status)
+	fmt.Printf("Peer with role %v done", status)
 	return nil
 }
 
