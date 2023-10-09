@@ -12,6 +12,7 @@ import (
 const (
 	NODE_TYPE_PEER  = "PEER"
 	NODE_TYPE_COORD = "COORD"
+	PEER_TIMEOUT    = 5 * time.Second
 )
 
 func main() {
@@ -22,15 +23,16 @@ func main() {
 	flag.StringVar(&coordAddress, "coordinator_address", "", "Address for coordinator node, mandatory field")
 
 	flag.Parse()
-	if nodeType == "" || coordAddress == "" || *coordPort == -1 {
-		fmt.Fprintf(os.Stderr, "Mandatory fields were missing, please check -h")
+	if nodeType == "" || *coordPort == -1 {
+		fmt.Fprintf(os.Stderr, "Mandatory fields were missing, please check -h\n")
 		os.Exit(1)
 	}
 
 	switch nodeType {
 	case NODE_TYPE_PEER:
 		// Await for some arbitrary duration to let coordinator node start up
-		time.Sleep(30 * time.Second)
+		fmt.Printf("Peer has been started, waiting for %v\n", PEER_TIMEOUT)
+		time.Sleep(PEER_TIMEOUT)
 
 		peerNode, err := peer.New(coordAddress, *coordPort)
 		if err != nil {
@@ -42,7 +44,6 @@ func main() {
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}
-		peerNode.SendData()
 
 		err = peerNode.Await()
 		if err != nil {
@@ -50,12 +51,15 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("Peer Node completed successfully")
+		fmt.Printf("Peer Node completed successfully\n")
 	case NODE_TYPE_COORD:
 		coordNode, err := coordinator.New(*coordPort)
 		if err != nil {
 			panic(err)
 		}
 		coordNode.Listen()
+	default:
+		fmt.Fprintf(os.Stderr, "Node type is not correct, it can be following: [%v, %v]", NODE_TYPE_COORD, NODE_TYPE_PEER)
+		os.Exit(1)
 	}
 }
