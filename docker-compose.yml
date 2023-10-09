@@ -5,23 +5,25 @@ services:
   coordinator:
     container_name: coordinator
     build: .
-    command: main -role coordinator
+    command: ./cmd -node_type COORD -coordinator_port 12345
     networks:
       - coord_to_first
       - coord_to_second
   first_peer:
+    depends_on:
+      - coordinator
     container_name: first_peer
     build: .
-    command: main -role peer
+    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345
     networks:
       - coord_to_first
 
   second_peer:
     container_name: second_peer
     depends_on:
-      - answer
+      - coordinator
     build: .
-    command: main -role peer
+    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345
     networks:
       - coord_to_second
 
