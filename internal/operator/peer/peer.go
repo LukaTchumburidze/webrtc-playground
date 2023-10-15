@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/pion/webrtc/v3"
-	"io"
 	"net/http"
 	"os"
 	"sync"
@@ -66,17 +65,11 @@ func (receiver *Peer) getICECandidates() error {
 			return err
 		}
 
-		b, err := io.ReadAll(resp.Body)
-		if err != nil {
+		var iceCandidates []webrtc.ICECandidateInit
+		if err := json.NewDecoder(resp.Body).Decode(&iceCandidates); err != nil {
 			return err
 		}
 		resp.Body.Close()
-
-		var iceCandidates []webrtc.ICECandidateInit
-		err = json.Unmarshal(b, &iceCandidates)
-		if err != nil {
-			return nil
-		}
 
 		for _, iceCandidate := range iceCandidates {
 			err = receiver.PeerConnection.AddICECandidate(iceCandidate)
@@ -329,7 +322,7 @@ func (receiver *Peer) resolveAnswer() error {
 	return nil
 }
 
-func (receiver *Peer) resolveStatus(status model.Status) error {
+func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 	switch status {
 	case coordinator.ROLE_OFFER:
 		err := receiver.resolveOffer()
@@ -406,7 +399,7 @@ func (receiver *Peer) InitConnection() error {
 			return err
 		}
 
-		fmt.Printf("Status is %v, Sleeping for %v\n", status, BUSY_TIMEOUT)
+		fmt.Printf("RoleStatus is %v, Sleeping for %v\n", status, BUSY_TIMEOUT)
 	}
 
 	err := receiver.resolveStatus(status)
