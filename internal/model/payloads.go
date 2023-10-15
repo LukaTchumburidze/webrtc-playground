@@ -4,10 +4,10 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-type Status string
+type RoleStatus string
 
 type RolePayload struct {
-	Status Status
+	Status RoleStatus
 	ID     string
 }
 

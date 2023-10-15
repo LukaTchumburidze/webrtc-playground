@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	STATUS_BUSY = model.Status("BUSY")
-	ROLE_OFFER  = model.Status("OFFER")
-	ROLE_ANSWER = model.Status("ANSWER")
+	STATUS_BUSY = model.RoleStatus("BUSY")
+	ROLE_OFFER  = model.RoleStatus("OFFER")
+	ROLE_ANSWER = model.RoleStatus("ANSWER")
 )
 const (
 	HTTP_ICE_PATH           = "/ice"
@@ -73,7 +73,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if receiver.isBusy {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.Status(STATUS_BUSY))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(STATUS_BUSY))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -89,7 +89,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if len(receiver.offers) == len(receiver.answers) {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.Status(ROLE_OFFER))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(ROLE_OFFER))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -103,7 +103,7 @@ func (receiver *Coordinator) handleRegister() {
 			receiver.offers = append(receiver.offers, nil)
 		} else {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.Status(ROLE_ANSWER))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(ROLE_ANSWER))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -244,6 +244,7 @@ func (receiver *Coordinator) handleSdp() {
 			b, err := io.ReadAll(r.Body)
 			if err != nil {
 				fmt.Fprint(os.Stderr, "error while extracting ICEInit for id %v\n", id)
+				return
 			}
 			r.Body.Close()
 
@@ -278,10 +279,6 @@ func (receiver *Coordinator) Listen() {
 	receiver.handleRegister()
 	receiver.handleSdp()
 	http.ListenAndServe(fmt.Sprintf(":%d", receiver.port), nil)
-	//select {
-	//case val := <-receiver.awaitChannel:
-	//	fmt.Printf("Coordinator was successful: %v\n", val)
-	//}
 }
 
 func (receiver *Coordinator) StopListening(val bool) {
