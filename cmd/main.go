@@ -39,14 +39,13 @@ func main() {
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}
-		err = peerNode.InitConnection()
-		if err != nil {
+
+		if err := peerNode.InitConnection(); err != nil {
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}
 
-		err = peerNode.Await()
-		if err != nil {
+		if err := peerNode.Await(); err != nil {
 			fmt.Fprint(os.Stderr, err)
 			os.Exit(1)
 		}

@@ -21,7 +21,7 @@ services:
   second_peer:
     container_name: second_peer
     depends_on:
-      - coordinator
+      - first_peer
     build: .
     command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345
     networks:
