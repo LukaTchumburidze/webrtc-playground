@@ -14,6 +14,7 @@ import (
 )
 
 const N_OF_MESSAGES = 5
+const DELAY_BETWEEN_MESSAGES = 2 * time.Second
 const BUSY_TIMEOUT = 20 * time.Second
 const DELAY_AFTER_OFFER = 5 * time.Second
 const DELAY_BEFORE_ANSWER = 5 * time.Second
@@ -130,6 +131,11 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 
 			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\n"))
 		}
+
+		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
+			fmt.Printf("Valid terminal state change, exitting \n")
+			peer.Stop()
+		}
 	})
 
 	return
@@ -214,7 +220,7 @@ func (receiver *Peer) setupDataChannel() error {
 	dataChannel.OnOpen(func() {
 		fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", dataChannel.Label(), dataChannel.ID())
 
-		for range time.NewTicker(5 * time.Second).C {
+		for i := 0; i < N_OF_MESSAGES; i++ {
 			message := coordinator.RandSeq(15)
 			fmt.Printf("Sending '%s'\n", message)
 
@@ -223,6 +229,12 @@ func (receiver *Peer) setupDataChannel() error {
 			if sendTextErr != nil {
 				panic(sendTextErr)
 			}
+			time.Sleep(DELAY_BETWEEN_MESSAGES)
+		}
+
+		err := receiver.PeerConnection.Close()
+		if err != nil {
+			fmt.Errorf("%v\n", err)
 		}
 	})
 
