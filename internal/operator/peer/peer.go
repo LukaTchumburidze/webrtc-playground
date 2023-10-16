@@ -13,18 +13,18 @@ import (
 	"webrtc-playground/internal/operator/coordinator"
 )
 
-const N_OF_MESSAGES = 5
-const DELAY_BETWEEN_MESSAGES = 2 * time.Second
-const BUSY_TIMEOUT = 20 * time.Second
-const DELAY_AFTER_OFFER = 5 * time.Second
-const DELAY_BEFORE_ANSWER = 5 * time.Second
-const TYPE_APP_JSON = "application/json; charset=utf-8"
-const URL_FORMAT = "http://%s:%d%s"
-
+const (
+	N_OF_MESSAGES          = 5
+	DELAY_BETWEEN_MESSAGES = 2 * time.Second
+	BUSY_TIMEOUT           = 20 * time.Second
+	DELAY_AFTER_OFFER      = 5 * time.Second
+	TYPE_APP_JSON          = "application/json; charset=utf-8"
+	URL_FORMAT             = "http://%s:%d%s"
+	GOOGLE_STUN_ADDRESS    = "stun:stun.l.google.com:19302"
+)
 const (
 	ICE_GET_DELAY  = 5 * time.Second
 	ICE_SEND_DELAY = 5 * time.Second
-	ICE_GET_TRIES  = 10
 )
 
 func (receiver *Peer) signalCandidates() error {
@@ -102,7 +102,7 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{"stun:stun.l.google.com:19302"},
+				URLs: []string{GOOGLE_STUN_ADDRESS},
 			},
 		},
 	}
