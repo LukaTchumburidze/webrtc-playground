@@ -243,7 +243,7 @@ func (receiver *Coordinator) handleSdp() {
 
 			b, err := io.ReadAll(r.Body)
 			if err != nil {
-				fmt.Fprint(os.Stderr, "error while extracting ICEInit for id %v\n", id)
+				fmt.Fprintf(os.Stderr, "error while extracting ICEInit for id %v\n", id)
 				return
 			}
 			r.Body.Close()
@@ -252,7 +252,7 @@ func (receiver *Coordinator) handleSdp() {
 
 			err = json.Unmarshal(b, &iceCandidates)
 			if err != nil {
-				fmt.Fprint(os.Stderr, "unmarshaling for id %v\n", id)
+				fmt.Fprintf(os.Stderr, "unmarshaling for id %v\n", id)
 			}
 
 			receiver.peerICECandidates[id] = iceCandidates
@@ -263,7 +263,7 @@ func (receiver *Coordinator) handleSdp() {
 
 			connectedId := receiver.connectedPeers[id]
 			if err := json.NewEncoder(w).Encode(receiver.peerICECandidates[connectedId]); err != nil {
-				fmt.Fprint(os.Stderr, "marshalling for id %v\n", id)
+				fmt.Fprintf(os.Stderr, "marshalling for id %v\n", id)
 				return
 			}
 
