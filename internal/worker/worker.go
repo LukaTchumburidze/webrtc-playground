@@ -1,4 +1,4 @@
-package mode
+package worker
 
 const (
 	WORKER_RAND_MESSAGES = "rand_messages"

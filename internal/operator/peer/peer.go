@@ -10,19 +10,17 @@ import (
 	"os"
 	"sync"
 	"time"
-	"webrtc-playground/internal/mode"
 	"webrtc-playground/internal/model"
 	"webrtc-playground/internal/operator/coordinator"
+	"webrtc-playground/internal/worker"
 )
 
 const (
-	N_OF_MESSAGES          = 5
-	DELAY_BETWEEN_MESSAGES = 2 * time.Second
-	BUSY_TIMEOUT           = 20 * time.Second
-	DELAY_AFTER_OFFER      = 5 * time.Second
-	TYPE_APP_JSON          = "application/json; charset=utf-8"
-	URL_FORMAT             = "http://%s:%d%s"
-	GOOGLE_STUN_ADDRESS    = "stun:stun.l.google.com:19302"
+	BUSY_TIMEOUT        = 20 * time.Second
+	DELAY_AFTER_OFFER   = 5 * time.Second
+	TYPE_APP_JSON       = "application/json; charset=utf-8"
+	URL_FORMAT          = "http://%s:%d%s"
+	GOOGLE_STUN_ADDRESS = "stun:stun.l.google.com:19302"
 )
 const (
 	ICE_GET_DELAY  = 5 * time.Second
@@ -99,10 +97,10 @@ type Peer struct {
 	receivedMsgCnt     int
 	id                 string
 
-	worker *mode.Worker
+	worker *worker.Worker
 }
 
-func New(coordinatorAddress string, coordinatorPort int, worker *mode.Worker) (peer *Peer, err error) {
+func New(coordinatorAddress string, coordinatorPort int, worker *worker.Worker) (peer *Peer, err error) {
 	if worker == nil {
 		return nil, errors.New("nil worker has been passed to peer")
 	}
@@ -240,21 +238,6 @@ func (receiver *Peer) setupDataChannel() error {
 		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
 		dataChannel.Close()
 
-		// TODO: Move this to one of the implementations of worker
-		//fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", dataChannel.Label(), dataChannel.ID())
-		//
-		//for i := 0; i < N_OF_MESSAGES; i++ {
-		//	message := coordinator.RandSeq(15)
-		//	fmt.Printf("Sending '%s'\n", message)
-		//
-		//	// Send the message as text
-		//	sendTextErr := dataChannel.SendText(message)
-		//	if sendTextErr != nil {
-		//		panic(sendTextErr)
-		//	}
-		//	time.Sleep(DELAY_BETWEEN_MESSAGES)
-		//}
-
 		err := receiver.PeerConnection.Close()
 		if err != nil {
 			fmt.Errorf("%v\n", err)
@@ -274,8 +257,6 @@ func (receiver *Peer) setupDataChannel() error {
 		if err != nil {
 			panic(err)
 		}
-
-		//fmt.Printf("Message from DataChannel '%s': '%s'\n", dataChannel.Label(), string(msg.Data))
 	})
 
 	return nil
@@ -387,15 +368,6 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 
 		fmt.Printf("Registration done")
 	case coordinator.ROLE_ANSWER:
-		//TODO: move this to appropriate worker implementation
-		//receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-		//	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		//		fmt.Printf("Message from DataChannel '%s': '%s'\n", channel.Label(), string(msg.Data))
-		//
-		//		channel.SendText("echo " + string(msg.Data))
-		//	})
-		//})
-
 		err := receiver.resolveAnswer()
 		if err != nil {
 			return err
