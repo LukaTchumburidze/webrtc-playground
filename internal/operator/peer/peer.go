@@ -13,6 +13,7 @@ import (
 	"webrtc-playground/internal/model"
 	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/worker"
+	"webrtc-playground/internal/worker/randmessage"
 )
 
 const (
@@ -225,20 +226,25 @@ func (receiver *Peer) setupDataChannel() error {
 		return err
 	}
 
+	fmt.Printf("Created DataChannel %v\n", dataChannel.Label())
+
 	dataChannel.OnOpen(func() {
-		prevByteLen := 1
-		for prevByteLen > 0 {
+		var err error
+		for err != randmessage.ErrFinish {
 			b, err := (*receiver.worker).ProducePayload()
 			if err != nil {
-				panic(err)
+				if err == randmessage.ErrFinish {
+					break
+				} else {
+					panic(err)
+				}
 			}
-			prevByteLen = len(b)
 			err = dataChannel.Send(b)
 		}
 		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
 		dataChannel.Close()
 
-		err := receiver.PeerConnection.Close()
+		err = receiver.PeerConnection.Close()
 		if err != nil {
 			fmt.Errorf("%v\n", err)
 		}
@@ -250,13 +256,16 @@ func (receiver *Peer) setupDataChannel() error {
 		receiver.PeerConnection.Close()
 	})
 
-	// Register text message handling
-	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		b := msg.Data
-		err = (*receiver.worker).ConsumePayload(b)
-		if err != nil {
-			panic(err)
-		}
+	receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
+		fmt.Printf("OnDataChannel %v\n", channel.Label())
+		// Register text message handling
+		channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+			b := msg.Data
+			err = (*receiver.worker).ConsumePayload(b)
+			if err != nil {
+				panic(err)
+			}
+		})
 	})
 
 	return nil

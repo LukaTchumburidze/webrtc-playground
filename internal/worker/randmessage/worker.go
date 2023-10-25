@@ -13,6 +13,8 @@ const (
 	DELAY_FOR_PRODUCING_MSG = 5 * time.Second
 )
 
+var ErrFinish = errors.New("sent all messages")
+
 func RandSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
 	if err != nil {
@@ -27,19 +29,21 @@ type RandMessageWorker struct {
 	msgCnt      int
 }
 
-func (receiver RandMessageWorker) ProducePayload() ([]byte, error) {
+func (receiver *RandMessageWorker) ProducePayload() ([]byte, error) {
 	if receiver.msgCnt == receiver.nOfMessages {
-		return nil, nil
+		return nil, ErrFinish
 	}
 	time.Sleep(DELAY_FOR_PRODUCING_MSG)
 
 	b := []byte(RandSeq(MSG_LENGTH))
+	fmt.Printf("Produced %v %v\n", receiver.msgCnt, string(b))
 
+	receiver.msgCnt++
 	return b, nil
 }
 
-func (receiver RandMessageWorker) ConsumePayload(bytes []byte) error {
-	fmt.Printf("%T %p received %v", receiver, receiver, string(bytes))
+func (receiver *RandMessageWorker) ConsumePayload(bytes []byte) error {
+	fmt.Printf("Consumed %v\n", string(bytes))
 
 	return nil
 }
