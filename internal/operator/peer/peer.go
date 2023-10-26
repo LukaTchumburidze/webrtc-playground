@@ -13,7 +13,6 @@ import (
 	"webrtc-playground/internal/model"
 	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/worker"
-	"webrtc-playground/internal/worker/randmessage"
 )
 
 const (
@@ -230,10 +229,10 @@ func (receiver *Peer) setupDataChannel() error {
 
 	dataChannel.OnOpen(func() {
 		var err error
-		for err != randmessage.ErrFinish {
+		for err != worker.ErrFinish {
 			b, err := (*receiver.worker).ProducePayload()
 			if err != nil {
-				if err == randmessage.ErrFinish {
+				if err == worker.ErrFinish {
 					break
 				} else {
 					panic(err)

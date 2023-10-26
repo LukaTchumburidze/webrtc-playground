@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/pion/randutil"
 	"time"
+	"webrtc-playground/internal/worker"
 )
 
 const (
@@ -12,8 +13,6 @@ const (
 	MSG_LENGTH              = 30
 	DELAY_FOR_PRODUCING_MSG = 5 * time.Second
 )
-
-var ErrFinish = errors.New("sent all messages")
 
 func RandSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -31,7 +30,7 @@ type RandMessageWorker struct {
 
 func (receiver *RandMessageWorker) ProducePayload() ([]byte, error) {
 	if receiver.msgCnt == receiver.nOfMessages {
-		return nil, ErrFinish
+		return nil, worker.ErrFinish
 	}
 	time.Sleep(DELAY_FOR_PRODUCING_MSG)
 
