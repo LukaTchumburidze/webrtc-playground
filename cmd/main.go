@@ -10,6 +10,7 @@ import (
 	"webrtc-playground/internal/operator/peer"
 	"webrtc-playground/internal/worker"
 	"webrtc-playground/internal/worker/chat"
+	fsworker "webrtc-playground/internal/worker/fs"
 	"webrtc-playground/internal/worker/randmessage"
 )
 
@@ -23,6 +24,8 @@ type WorkerFlags struct {
 	Mode        string
 	NOfMessages int
 	Username    string
+	Directory   string
+	Recursive   bool
 }
 
 func setupWorkerFlags(workerFlags *WorkerFlags) {
@@ -33,6 +36,10 @@ func setupWorkerFlags(workerFlags *WorkerFlags) {
 	flag.IntVar(&workerFlags.NOfMessages, "n_of_messages", randmessage.DEFAULT_N_OF_MESSAGES, nOfMessagesFlagDescription)
 	usernameFlagDescription := fmt.Sprintf("worker: %v, arbitrary username for chat user", worker.WORKER_CHAT)
 	flag.StringVar(&workerFlags.Username, "username", chat.DEFAULT_USERNAME, usernameFlagDescription)
+	directoryFlagDescription := fmt.Sprintf("worker : %v, directory which should be updated/monitored for updates by this worker", worker.WORKER_FS)
+	flag.StringVar(&workerFlags.Directory, "directory", fsworker.DEFAULT_PATH, directoryFlagDescription)
+	recursiveFlagDescription := fmt.Sprintf("worker : %v, whether subdirectories should be monitored as well", worker.WORKER_FS)
+	flag.BoolVar(&workerFlags.Recursive, "recursive", fsworker.DEFAULT_RECURSIVE, recursiveFlagDescription)
 
 }
 
@@ -44,6 +51,8 @@ func createWorkerFromFlags(workerFlags *WorkerFlags) (w worker.Worker, err error
 		w, err = randmessage.New(workerFlags.NOfMessages)
 	case worker.WORKER_CHAT:
 		w, err = chat.New(workerFlags.Username)
+	case worker.WORKER_FS:
+		w, err = fsworker.New(workerFlags.Directory, workerFlags.Recursive)
 	}
 
 	return
