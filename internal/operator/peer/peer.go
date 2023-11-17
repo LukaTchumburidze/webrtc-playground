@@ -239,6 +239,10 @@ func (receiver *Peer) setupDataChannel() error {
 				}
 			}
 			err = dataChannel.Send(b)
+			if err != nil {
+				panic(err)
+				break
+			}
 		}
 		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
 		dataChannel.Close()
