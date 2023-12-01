@@ -3,12 +3,14 @@ package peer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/pion/webrtc/v3"
 	"net/http"
 	"os"
 	"sync"
 	"time"
+	"webrtc-playground/internal/mode"
 	"webrtc-playground/internal/model"
 	"webrtc-playground/internal/operator/coordinator"
 )
@@ -96,9 +98,15 @@ type Peer struct {
 	sentMsgCnt         int
 	receivedMsgCnt     int
 	id                 string
+
+	worker *mode.Worker
 }
 
-func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error) {
+func New(coordinatorAddress string, coordinatorPort int, worker *mode.Worker) (peer *Peer, err error) {
+	if worker == nil {
+		return nil, errors.New("nil worker has been passed to peer")
+	}
+
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
@@ -117,6 +125,7 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 		PeerConnection:     peerConnection,
 		waitChannel:        make(chan error),
 		pendingCandidates:  make([]*webrtc.ICECandidateInit, 0),
+		worker:             worker,
 	}
 
 	// Set the handler for Peer connection state
@@ -132,6 +141,7 @@ func New(coordinatorAddress string, coordinatorPort int) (peer *Peer, err error)
 			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\n"))
 		}
 
+		//TODO: Currently connection state disconnected is being regarded as valid exit, don't think this is correct
 		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
 			fmt.Printf("Valid terminal state change, exitting \n")
 			peer.Stop()
@@ -218,19 +228,32 @@ func (receiver *Peer) setupDataChannel() error {
 	}
 
 	dataChannel.OnOpen(func() {
-		fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", dataChannel.Label(), dataChannel.ID())
-
-		for i := 0; i < N_OF_MESSAGES; i++ {
-			message := coordinator.RandSeq(15)
-			fmt.Printf("Sending '%s'\n", message)
-
-			// Send the message as text
-			sendTextErr := dataChannel.SendText(message)
-			if sendTextErr != nil {
-				panic(sendTextErr)
+		prevByteLen := 1
+		for prevByteLen > 0 {
+			b, err := (*receiver.worker).ProducePayload()
+			if err != nil {
+				panic(err)
 			}
-			time.Sleep(DELAY_BETWEEN_MESSAGES)
+			prevByteLen = len(b)
+			err = dataChannel.Send(b)
 		}
+		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
+		dataChannel.Close()
+
+		// TODO: Move this to one of the implementations of worker
+		//fmt.Printf("Data channel '%s'-'%d' open. Random messages will now be sent to any connected DataChannels every 5 seconds\n", dataChannel.Label(), dataChannel.ID())
+		//
+		//for i := 0; i < N_OF_MESSAGES; i++ {
+		//	message := coordinator.RandSeq(15)
+		//	fmt.Printf("Sending '%s'\n", message)
+		//
+		//	// Send the message as text
+		//	sendTextErr := dataChannel.SendText(message)
+		//	if sendTextErr != nil {
+		//		panic(sendTextErr)
+		//	}
+		//	time.Sleep(DELAY_BETWEEN_MESSAGES)
+		//}
 
 		err := receiver.PeerConnection.Close()
 		if err != nil {
@@ -238,19 +261,27 @@ func (receiver *Peer) setupDataChannel() error {
 		}
 	})
 
+	// Current version basically is just one DataChannel, if it gets closed, peers should finish work
+	dataChannel.OnClose(func() {
+		fmt.Printf("DataChannel was closed, closing peer connection")
+		receiver.PeerConnection.Close()
+	})
+
 	// Register text message handling
 	dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		fmt.Printf("Message from DataChannel '%s': '%s'\n", dataChannel.Label(), string(msg.Data))
+		b := msg.Data
+		err = (*receiver.worker).ConsumePayload(b)
+		if err != nil {
+			panic(err)
+		}
+
+		//fmt.Printf("Message from DataChannel '%s': '%s'\n", dataChannel.Label(), string(msg.Data))
 	})
 
 	return nil
 }
 
 func (receiver *Peer) resolveOffer() error {
-	if err := receiver.setupDataChannel(); err != nil {
-		return nil
-	}
-
 	if err := receiver.sendOfferSDP(); err != nil {
 		return err
 	}
@@ -335,6 +366,10 @@ func (receiver *Peer) resolveAnswer() error {
 }
 
 func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
+	if err := receiver.setupDataChannel(); err != nil {
+		return nil
+	}
+
 	switch status {
 	case coordinator.ROLE_OFFER:
 		err := receiver.resolveOffer()
@@ -352,13 +387,14 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 
 		fmt.Printf("Registration done")
 	case coordinator.ROLE_ANSWER:
-		receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-			channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-				fmt.Printf("Message from DataChannel '%s': '%s'\n", channel.Label(), string(msg.Data))
-
-				channel.SendText("echo " + string(msg.Data))
-			})
-		})
+		//TODO: move this to appropriate worker implementation
+		//receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
+		//	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
+		//		fmt.Printf("Message from DataChannel '%s': '%s'\n", channel.Label(), string(msg.Data))
+		//
+		//		channel.SendText("echo " + string(msg.Data))
+		//	})
+		//})
 
 		err := receiver.resolveAnswer()
 		if err != nil {
