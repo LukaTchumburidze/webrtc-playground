@@ -40,19 +40,6 @@ type FsWorker struct {
 	peerReceivedEventStorage *sync.Map
 }
 
-func (receiver *FsWorker) addWip(key string) {
-	receiver.wipStorage.Store(key, time.Now().Add(WIP_DURATION))
-}
-
-func (receiver *FsWorker) removeWip(key string) {
-	receiver.wipStorage.Delete(key)
-}
-
-func (receiver *FsWorker) isWip(key string) bool {
-	_, ok := receiver.wipStorage.Load(key)
-	return ok
-}
-
 func encodePayload(payload WorkerPayload) ([]byte, error) {
 	buff := bytes.Buffer{}
 	err := json.NewEncoder(&buff).Encode(payload)
