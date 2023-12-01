@@ -1,0 +1,34 @@
+version: '3'
+# Initial config, 3 nodes, 2 peers and 1 coordinator
+# Peers are in different networks, coordinator is in both networks
+services:
+  coordinator:
+    container_name: coordinator
+    build: .
+    command: ./cmd -node_type COORD -coordinator_port 12345
+    networks:
+      - coord_to_first
+      - coord_to_second
+  first_peer:
+    depends_on:
+      - coordinator
+    container_name: first_peer
+    build: .
+    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345  -worker fs -directory ./syncdir
+    networks:
+      - coord_to_first
+
+  second_peer:
+    container_name: second_peer
+    depends_on:
+      - first_peer
+    build: .
+    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345  -worker fs -directory ./syncdir
+    networks:
+      - coord_to_second
+
+networks:
+  coord_to_first:
+    driver: bridge
+  coord_to_second:
+    driver: bridge

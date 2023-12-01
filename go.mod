@@ -4,6 +4,8 @@ go 1.20
 
 require github.com/pion/webrtc/v3 v3.2.11
 
+require github.com/fsnotify/fsnotify v1.7.0
+
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/uuid v1.3.0 // indirect

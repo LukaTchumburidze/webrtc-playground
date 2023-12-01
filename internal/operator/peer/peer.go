@@ -239,6 +239,10 @@ func (receiver *Peer) setupDataChannel() error {
 				}
 			}
 			err = dataChannel.Send(b)
+			if err != nil {
+				panic(err)
+				break
+			}
 		}
 		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
 		dataChannel.Close()
@@ -374,7 +378,7 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 			return err
 		}
 
-		fmt.Printf("Registration done")
+		fmt.Printf("Registration done\n")
 	case coordinator.ROLE_ANSWER:
 		err := receiver.resolveAnswer()
 		if err != nil {
