@@ -12,7 +12,7 @@ type RolePayload struct {
 }
 
 type SDPPayload struct {
-	Sdp *webrtc.SessionDescription
+	SDP *webrtc.SessionDescription
 	ID  string
 }
 

@@ -1,11 +1,10 @@
-package randmessage
+package worker
 
 import (
 	"errors"
 	"fmt"
 	"github.com/pion/randutil"
 	"time"
-	"webrtc-playground/internal/worker"
 )
 
 const (
@@ -30,7 +29,7 @@ type RandMessageWorker struct {
 
 func (receiver *RandMessageWorker) ProducePayload() ([]byte, error) {
 	if receiver.msgCnt == receiver.nOfMessages {
-		return nil, worker.ErrFinish
+		return nil, ErrFinish
 	}
 	time.Sleep(DELAY_FOR_PRODUCING_MSG)
 
@@ -47,7 +46,7 @@ func (receiver *RandMessageWorker) ConsumePayload(bytes []byte) error {
 	return nil
 }
 
-func New(nOfMessages int) (*RandMessageWorker, error) {
+func NewRandMessageWorker(nOfMessages int) (*RandMessageWorker, error) {
 	if nOfMessages <= 0 {
 		return nil, errors.New("number of messages should be positive")
 	}

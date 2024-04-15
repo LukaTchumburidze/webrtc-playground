@@ -15,21 +15,21 @@ import (
 )
 
 const (
-	STATUS_BUSY = model.RoleStatus("BUSY")
-	ROLE_OFFER  = model.RoleStatus("OFFER")
-	ROLE_ANSWER = model.RoleStatus("ANSWER")
+	StatusBusy = model.RoleStatus("BUSY")
+	RoleOffer  = model.RoleStatus("OFFER")
+	RoleAnswer = model.RoleStatus("ANSWER")
 )
 const (
-	HTTP_ICE_PATH           = "/ice"
-	HTTP_REGISTER_PATH      = "/register"
-	HTTP_SDP_OFFER_PATH     = "/sdp/offer"
-	HTTP_SDP_ANSWER_PATH    = "/sdp/answer"
-	HTTP_REGISTER_DONE_PATH = "/register/done"
+	HTTPICEPath          = "/ice"
+	HttpRegisterPath     = "/register"
+	HttpSDPPath          = "/sdp/offer"
+	HttpSDPAnswerPath    = "/sdp/answer"
+	HttpRegisterDonePath = "/register/done"
 
-	MATCHING_TIMEOUT = 60 * time.Second
+	MatchingTimeout = 60 * time.Second
 )
 
-const ID_LENGTH = 5
+const IDLength = 5
 
 func RandSeq(n int) string {
 	val, err := randutil.GenerateCryptoRandomString(n, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -65,7 +65,7 @@ func New(port int) (*Coordinator, error) {
 }
 
 func (receiver *Coordinator) handleRegister() {
-	http.HandleFunc(HTTP_REGISTER_PATH, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HttpRegisterPath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -73,7 +73,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if receiver.isBusy {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.RoleStatus(STATUS_BUSY))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(StatusBusy))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -89,7 +89,7 @@ func (receiver *Coordinator) handleRegister() {
 
 		if len(receiver.offers) == len(receiver.answers) {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.RoleStatus(ROLE_OFFER))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(RoleOffer))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -103,7 +103,7 @@ func (receiver *Coordinator) handleRegister() {
 			receiver.offers = append(receiver.offers, nil)
 		} else {
 			buff := bytes.Buffer{}
-			err := json.NewEncoder(&buff).Encode(model.RoleStatus(ROLE_ANSWER))
+			err := json.NewEncoder(&buff).Encode(model.RoleStatus(RoleAnswer))
 			if err != nil {
 				fmt.Fprint(os.Stderr, err)
 				return
@@ -122,7 +122,7 @@ func (receiver *Coordinator) handleRegister() {
 	})
 
 	// Should be called by offer peer once it retrieves answer's SDP
-	http.HandleFunc(HTTP_REGISTER_DONE_PATH, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HttpRegisterDonePath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -143,7 +143,7 @@ func (receiver *Coordinator) handleRegister() {
 
 func (receiver *Coordinator) resetBusyState() {
 	oldLen := len(receiver.offers)
-	time.Sleep(MATCHING_TIMEOUT)
+	time.Sleep(MatchingTimeout)
 
 	if len(receiver.offers) == oldLen &&
 		(receiver.offers[oldLen-1] == nil ||
@@ -161,7 +161,7 @@ func (receiver *Coordinator) resetBusyState() {
 }
 
 func (receiver *Coordinator) handleSdp() {
-	http.HandleFunc(HTTP_SDP_OFFER_PATH, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HttpSDPPath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -176,8 +176,8 @@ func (receiver *Coordinator) handleSdp() {
 				return
 			}
 			sdpPayload := &model.SDPPayload{
-				ID:  RandSeq(ID_LENGTH),
-				Sdp: &sdp,
+				ID:  RandSeq(IDLength),
+				SDP: &sdp,
 			}
 			fmt.Printf("Received SDP from offer peer %v\n", sdpPayload.ID)
 			receiver.offers[len(receiver.offers)-1] = sdpPayload
@@ -197,7 +197,7 @@ func (receiver *Coordinator) handleSdp() {
 		}
 	})
 
-	http.HandleFunc(HTTP_SDP_ANSWER_PATH, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HttpSDPAnswerPath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
@@ -212,8 +212,8 @@ func (receiver *Coordinator) handleSdp() {
 				return
 			}
 			sdpPayload := &model.SDPPayload{
-				Sdp: &sdp,
-				ID:  RandSeq(ID_LENGTH),
+				SDP: &sdp,
+				ID:  RandSeq(IDLength),
 			}
 
 			fmt.Printf("Received SDP from answer peer %v\n", sdpPayload.ID)
@@ -231,7 +231,7 @@ func (receiver *Coordinator) handleSdp() {
 		}
 	})
 
-	http.HandleFunc(HTTP_ICE_PATH, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HTTPICEPath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 

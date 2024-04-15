@@ -179,7 +179,7 @@ func (receiver *Peer) sendOfferSDP() error {
 		return err
 	}
 
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH)
+	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
 	_, err = http.Post(curPath,
 		TYPE_APP_JSON,
 		bytes.NewReader(payload))
@@ -198,7 +198,7 @@ func (receiver *Peer) getAnswerSDPID() (string, error) {
 	// RECEIVE answer connection
 	fmt.Printf("Getting answer SDP\n")
 
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH)
+	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
 	resp, err := http.Get(curPath)
 	if err != nil {
 		fmt.Fprint(os.Stderr, err)
@@ -210,7 +210,7 @@ func (receiver *Peer) getAnswerSDPID() (string, error) {
 		fmt.Fprint(os.Stderr, err)
 		return "", err
 	}
-	err = receiver.PeerConnection.SetRemoteDescription(*answerPayload.Sdp)
+	err = receiver.PeerConnection.SetRemoteDescription(*answerPayload.SDP)
 	if err != nil {
 		fmt.Fprint(os.Stderr, err)
 		return "", err
@@ -241,7 +241,6 @@ func (receiver *Peer) setupDataChannel() error {
 			err = dataChannel.Send(b)
 			if err != nil {
 				panic(err)
-				break
 			}
 		}
 		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
@@ -249,7 +248,7 @@ func (receiver *Peer) setupDataChannel() error {
 
 		err = receiver.PeerConnection.Close()
 		if err != nil {
-			fmt.Errorf("%v\n", err)
+			fmt.Fprintf(os.Stderr, "%v\n", err)
 		}
 	})
 
@@ -293,7 +292,7 @@ func (receiver *Peer) resolveOffer() error {
 }
 
 func (receiver *Peer) getOfferSDPID() (string, error) {
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH)
+	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
 
 	resp, err := http.Get(curPath)
 	if err != nil {
@@ -305,7 +304,7 @@ func (receiver *Peer) getOfferSDPID() (string, error) {
 	if err := resp.Body.Close(); err != nil {
 		return "", err
 	}
-	err = receiver.PeerConnection.SetRemoteDescription(*offerPayload.Sdp)
+	err = receiver.PeerConnection.SetRemoteDescription(*offerPayload.SDP)
 	if err != nil {
 		return "", err
 	}
@@ -330,7 +329,7 @@ func (receiver *Peer) sendAnswerSDP() error {
 	}
 
 	fmt.Printf("Sending answer SDP\n")
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH)
+	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
 	_, err = http.Post(curPath,
 		TYPE_APP_JSON,
 		bytes.NewReader(payload))
@@ -364,13 +363,13 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 	}
 
 	switch status {
-	case coordinator.ROLE_OFFER:
+	case coordinator.RoleOffer:
 		err := receiver.resolveOffer()
 		if err != nil {
 			return err
 		}
 
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_DONE_PATH)
+		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterDonePath)
 		_, err = http.Post(curPath,
 			TYPE_APP_JSON,
 			bytes.NewReader([]byte{}))
@@ -379,7 +378,7 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 		}
 
 		fmt.Printf("Registration done\n")
-	case coordinator.ROLE_ANSWER:
+	case coordinator.RoleAnswer:
 		err := receiver.resolveAnswer()
 		if err != nil {
 			return err
@@ -414,10 +413,10 @@ func (receiver *Peer) InitConnection() error {
 		receiver.pendingCandidates = append(receiver.pendingCandidates, &webrtc.ICECandidateInit{Candidate: c.ToJSON().Candidate})
 	})
 
-	status := coordinator.STATUS_BUSY
+	status := coordinator.StatusBusy
 
-	for status == coordinator.STATUS_BUSY {
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH)
+	for status == coordinator.StatusBusy {
+		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterPath)
 		resp, err := http.Post(curPath,
 			TYPE_APP_JSON,
 			bytes.NewReader([]byte{}))

@@ -1,4 +1,4 @@
-package chat
+package worker
 
 import (
 	"bufio"
@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"webrtc-playground/internal/worker"
 )
 
 const (
-	DEFAULT_USERNAME = "username"
+	DefaultUsername = "username"
 )
 
 type ChatWorker struct {
@@ -22,7 +21,7 @@ func (receiver *ChatWorker) ProducePayload() ([]byte, error) {
 	input, err := receiver.reader.ReadString('\n')
 
 	if err == io.EOF {
-		return nil, worker.ErrFinish
+		return nil, ErrFinish
 	}
 
 	return []byte(fmt.Sprintf("%v: %v", receiver.username, input)), err
@@ -34,7 +33,7 @@ func (receiver *ChatWorker) ConsumePayload(bytes []byte) error {
 	return nil
 }
 
-func New(username string) (*ChatWorker, error) {
+func NewChatWorker(username string) (*ChatWorker, error) {
 	if username == "" {
 		return nil, errors.New("username can't be empty")
 	}
