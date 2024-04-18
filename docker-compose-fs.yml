@@ -5,7 +5,7 @@ services:
   coordinator:
     container_name: coordinator
     build: .
-    command: ./cmd -node_type COORD -coordinator_port 12345
+    command: ./webrtc-playground coordinator --port=12345
     networks:
       - coord_to_first
       - coord_to_second
@@ -14,7 +14,7 @@ services:
       - coordinator
     container_name: first_peer
     build: .
-    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345  -worker fs -directory ./syncdir
+    command: /webrtc-playground peer fs --coordinator_address=coordinator --coordinator_port=12345 -directory ./syncdir
     networks:
       - coord_to_first
 
@@ -23,7 +23,7 @@ services:
     depends_on:
       - first_peer
     build: .
-    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345  -worker fs -directory ./syncdir
+    command: /webrtc-playground peer fs --coordinator_address=coordinator --coordinator_port=12345 -directory ./syncdir
     networks:
       - coord_to_second
 

@@ -88,7 +88,7 @@ func (receiver *Peer) getICECandidates() error {
 
 type Peer struct {
 	CoordinatorAddress string
-	CoordinatorPort    int
+	CoordinatorPort    uint16
 	PeerConnection     *webrtc.PeerConnection
 	waitChannel        chan error
 	pendingCandidates  []*webrtc.ICECandidateInit
@@ -100,7 +100,7 @@ type Peer struct {
 	worker *worker.Worker
 }
 
-func New(coordinatorAddress string, coordinatorPort int, worker *worker.Worker) (peer *Peer, err error) {
+func New(coordinatorAddress string, coordinatorPort uint16, worker *worker.Worker) (peer *Peer, err error) {
 	if worker == nil {
 		return nil, errors.New("nil worker has been passed to peer")
 	}

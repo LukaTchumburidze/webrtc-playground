@@ -52,9 +52,9 @@ type Coordinator struct {
 	peerICECandidates map[string][]webrtc.ICECandidateInit
 }
 
-func New(port int) (*Coordinator, error) {
+func New(port uint16) (*Coordinator, error) {
 	return &Coordinator{
-		port:              port,
+		port:              int(port),
 		offers:            make([]*model.SDPPayload, 0),
 		answers:           make([]*model.SDPPayload, 0),
 		awaitChannel:      make(chan bool),
@@ -275,7 +275,7 @@ func (receiver *Coordinator) handleSdp() {
 }
 
 func (receiver *Coordinator) Listen() {
-	fmt.Printf("Coordinator is starting listening\n")
+	fmt.Printf("Coordinator has started listening\n")
 	receiver.handleRegister()
 	receiver.handleSdp()
 	http.ListenAndServe(fmt.Sprintf(":%d", receiver.port), nil)

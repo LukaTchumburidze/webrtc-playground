@@ -23,8 +23,8 @@ func RandSeq(n int) string {
 }
 
 type RandMessageWorker struct {
-	nOfMessages int
-	msgCnt      int
+	nOfMessages uint
+	msgCnt      uint
 }
 
 func (receiver *RandMessageWorker) ProducePayload() ([]byte, error) {
@@ -46,7 +46,7 @@ func (receiver *RandMessageWorker) ConsumePayload(bytes []byte) error {
 	return nil
 }
 
-func NewRandMessageWorker(nOfMessages int) (*RandMessageWorker, error) {
+func NewRandMessageWorker(nOfMessages uint) (*RandMessageWorker, error) {
 	if nOfMessages <= 0 {
 		return nil, errors.New("number of messages should be positive")
 	}
