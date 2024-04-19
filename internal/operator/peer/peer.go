@@ -6,33 +6,39 @@ import (
 	"errors"
 	"fmt"
 	"github.com/pion/webrtc/v3"
+	"github.com/sirupsen/logrus"
 	"net/http"
-	"os"
 	"sync"
 	"time"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/model"
 	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/worker"
 )
 
 const (
-	BUSY_TIMEOUT        = 20 * time.Second
-	DELAY_AFTER_OFFER   = 5 * time.Second
-	TYPE_APP_JSON       = "application/json; charset=utf-8"
-	URL_FORMAT          = "http://%s:%d%s"
-	GOOGLE_STUN_ADDRESS = "stun:stun.l.google.com:19302"
+	BusyTimeout       = 20 * time.Second
+	DelayAfterOffer   = 5 * time.Second
+	TypeAppJson       = "application/json; charset=utf-8"
+	UrlFormat         = "http://%s:%d%s"
+	GoogleStunAddress = "stun:stun.l.google.com:19302"
+
+	IceGetDelay  = 5 * time.Second
+	IceSendDelay = 5 * time.Second
 )
-const (
-	ICE_GET_DELAY  = 5 * time.Second
-	ICE_SEND_DELAY = 5 * time.Second
+
+var (
+	ErrCandidateIdNotSet     = errors.New("id is not set, can't send candidate")
+	ErrNilWorker             = errors.New("nil worker has been passed to peer")
+	ErrConnectionStateFailed = errors.New("peer Connection has gone to failed")
 )
 
 func (receiver *Peer) signalCandidates() error {
 	if receiver.id == "" {
-		panic("id is not set, can't send candidate")
+		return ErrCandidateIdNotSet
 	}
 
-	fmt.Printf("Sending %v candidates to coordinator\n", len(receiver.pendingCandidates))
+	logger.Logger.WithField("cnt", len(receiver.pendingCandidates)).Info("Sending candidates to coordinator")
 
 	receiver.candidatesMux.Lock()
 	defer receiver.candidatesMux.Unlock()
@@ -57,7 +63,7 @@ func (receiver *Peer) getICECandidates() error {
 	receiver.candidatesMux.Lock()
 	defer receiver.candidatesMux.Unlock()
 
-	fmt.Printf("Started getting ICEInit Candidates from coordinator at %v:%v\n", receiver.CoordinatorAddress, receiver.CoordinatorPort)
+	logger.Logger.WithField("address", fmt.Sprintf("%v:%v", receiver.CoordinatorAddress, receiver.CoordinatorPort)).Info("Started getting ICEInit Candidates from coordinator")
 	for try := 0; try < 1; try++ {
 		curPath := fmt.Sprintf("http://%v:%v/ice?id=%v", receiver.CoordinatorAddress, receiver.CoordinatorPort, receiver.id)
 		resp, err := http.Get(curPath)
@@ -79,10 +85,10 @@ func (receiver *Peer) getICECandidates() error {
 			}
 		}
 
-		fmt.Printf("Received %v candidates from coordinator\n", len(iceCandidates))
+		logger.Logger.WithField("cnt", len(iceCandidates)).Info("Received candidates from coordinator")
 	}
-	fmt.Printf("Finished getting ICEInit candidates\n")
 
+	logger.Logger.Info("Finished getting ICEInit Candidates from coordinator")
 	return nil
 }
 
@@ -102,13 +108,13 @@ type Peer struct {
 
 func New(coordinatorAddress string, coordinatorPort uint16, worker *worker.Worker) (peer *Peer, err error) {
 	if worker == nil {
-		return nil, errors.New("nil worker has been passed to peer")
+		return nil, ErrNilWorker
 	}
 
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{GOOGLE_STUN_ADDRESS},
+				URLs: []string{GoogleStunAddress},
 			},
 		},
 	}
@@ -129,19 +135,19 @@ func New(coordinatorAddress string, coordinatorPort uint16, worker *worker.Worke
 	// Set the handler for Peer connection state
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		fmt.Printf("Peer Connection State has changed: %s\n", s.String())
+		logger.Logger.WithField("state", s.String()).Info("Peer Connection State has changed")
 
 		if s == webrtc.PeerConnectionStateFailed {
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICEInit Restart.
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
 
-			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\n"))
+			peer.stop(ErrConnectionStateFailed)
 		}
 
 		//TODO: Currently connection state disconnected is being regarded as valid exit, don't think this is correct
 		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
-			fmt.Printf("Valid terminal state change, exitting \n")
+			logger.Logger.Info("Valid terminal state change, exiting")
 			peer.Stop()
 		}
 	})
@@ -150,7 +156,7 @@ func New(coordinatorAddress string, coordinatorPort uint16, worker *worker.Worke
 }
 
 func (receiver *Peer) Await() error {
-	fmt.Printf("Waiting to stop\n")
+	logger.Logger.Info("Waiting to stop")
 	select {
 	case err := <-receiver.waitChannel:
 		return err
@@ -167,7 +173,7 @@ func (receiver *Peer) Stop() {
 
 func (receiver *Peer) sendOfferSDP() error {
 	// SEND offer role
-	fmt.Printf("Sending Offer SDP\n")
+	logger.Logger.Info("Sending Offer SDP")
 
 	offer, err := receiver.PeerConnection.CreateOffer(nil)
 	if err != nil {
@@ -179,9 +185,9 @@ func (receiver *Peer) sendOfferSDP() error {
 		return err
 	}
 
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
+	curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
 	_, err = http.Post(curPath,
-		TYPE_APP_JSON,
+		TypeAppJson,
 		bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -196,23 +202,20 @@ func (receiver *Peer) sendOfferSDP() error {
 
 func (receiver *Peer) getAnswerSDPID() (string, error) {
 	// RECEIVE answer connection
-	fmt.Printf("Getting answer SDP\n")
+	logger.Logger.Info("Getting answer SDP")
 
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
+	curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
 	resp, err := http.Get(curPath)
 	if err != nil {
-		fmt.Fprint(os.Stderr, err)
 		return "", err
 	}
 	var answerPayload model.SDPPayload
 	err = json.NewDecoder(resp.Body).Decode(&answerPayload)
 	if err := resp.Body.Close(); err != nil {
-		fmt.Fprint(os.Stderr, err)
 		return "", err
 	}
 	err = receiver.PeerConnection.SetRemoteDescription(*answerPayload.SDP)
 	if err != nil {
-		fmt.Fprint(os.Stderr, err)
 		return "", err
 	}
 
@@ -224,47 +227,49 @@ func (receiver *Peer) setupDataChannel() error {
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("Created DataChannel %v\n", dataChannel.Label())
+	logger.Logger.WithField("label", dataChannel.Label()).Info("Created DataChannel")
 
 	dataChannel.OnOpen(func() {
 		var err error
-		for err != worker.ErrFinish {
+		for err != nil && !errors.Is(err, worker.ErrFinish) {
 			b, err := (*receiver.worker).ProducePayload()
 			if err != nil {
-				if err == worker.ErrFinish {
+				if errors.Is(err, worker.ErrFinish) {
 					break
 				} else {
+					// Could not identify error, we should panic
 					panic(err)
 				}
 			}
 			err = dataChannel.Send(b)
 			if err != nil {
+				// Could not send for some reason, we should panic
 				panic(err)
 			}
 		}
-		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
+		logger.Logger.Info("Worker finished producing payload, closing DataChannel")
 		dataChannel.Close()
 
 		err = receiver.PeerConnection.Close()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%v\n", err)
+			logger.Logger.WithError(err).Error("error on peer connection close")
 		}
 	})
 
 	// Current version basically is just one DataChannel, if it gets closed, peers should finish work
 	dataChannel.OnClose(func() {
-		fmt.Printf("DataChannel was closed, closing peer connection")
+		logger.Logger.Info("DataChannel was closed, closing peer connection")
 		receiver.PeerConnection.Close()
 	})
 
 	receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-		fmt.Printf("OnDataChannel %v\n", channel.Label())
+		logger.Logger.WithField("label", channel.Label()).Info("OnDataChannel")
 		// Register text message handling
 		channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 			b := msg.Data
 			err = (*receiver.worker).ConsumePayload(b)
 			if err != nil {
+				// Could not consume payload properly, since there is no further mechanism we should panic
 				panic(err)
 			}
 		})
@@ -278,8 +283,8 @@ func (receiver *Peer) resolveOffer() error {
 		return err
 	}
 
-	fmt.Printf("Sleeping after offer\n")
-	time.Sleep(DELAY_AFTER_OFFER)
+	logger.Logger.WithField("duration", DelayAfterOffer).Info("Sleeping after offer")
+	time.Sleep(DelayAfterOffer)
 
 	id, err := receiver.getAnswerSDPID()
 	if err != nil {
@@ -292,7 +297,7 @@ func (receiver *Peer) resolveOffer() error {
 }
 
 func (receiver *Peer) getOfferSDPID() (string, error) {
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
+	curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPPath)
 
 	resp, err := http.Get(curPath)
 	if err != nil {
@@ -328,13 +333,12 @@ func (receiver *Peer) sendAnswerSDP() error {
 		return err
 	}
 
-	fmt.Printf("Sending answer SDP\n")
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
+	logger.Logger.Info("Sending answer SDP")
+	curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpSDPAnswerPath)
 	_, err = http.Post(curPath,
-		TYPE_APP_JSON,
+		TypeAppJson,
 		bytes.NewReader(payload))
 	if err != nil {
-		fmt.Fprint(os.Stderr, err)
 		return err
 	}
 
@@ -342,7 +346,7 @@ func (receiver *Peer) sendAnswerSDP() error {
 }
 
 func (receiver *Peer) resolveAnswer() error {
-	fmt.Printf("Getting offer SDP\n")
+	logger.Logger.Info("Getting offer SDP")
 
 	id, err := receiver.getOfferSDPID()
 	if err != nil {
@@ -352,7 +356,6 @@ func (receiver *Peer) resolveAnswer() error {
 	if err = receiver.sendAnswerSDP(); err != nil {
 		return err
 	}
-
 	receiver.id = id
 	return nil
 }
@@ -369,15 +372,15 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 			return err
 		}
 
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterDonePath)
+		curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterDonePath)
 		_, err = http.Post(curPath,
-			TYPE_APP_JSON,
+			TypeAppJson,
 			bytes.NewReader([]byte{}))
 		if err != nil {
 			return err
 		}
 
-		fmt.Printf("Registration done\n")
+		logger.Logger.Info("Registration done")
 	case coordinator.RoleAnswer:
 		err := receiver.resolveAnswer()
 		if err != nil {
@@ -385,12 +388,12 @@ func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
 		}
 	}
 
-	time.Sleep(ICE_SEND_DELAY)
+	time.Sleep(IceSendDelay)
 	err := receiver.signalCandidates()
 	if err != nil {
 		return nil
 	}
-	time.Sleep(ICE_GET_DELAY)
+	time.Sleep(IceGetDelay)
 	err = receiver.getICECandidates()
 	if err != nil {
 		return nil
@@ -408,38 +411,38 @@ func (receiver *Peer) InitConnection() error {
 		receiver.candidatesMux.Lock()
 		defer receiver.candidatesMux.Unlock()
 
-		fmt.Printf("Adding candidate %v\n", c.String())
-
+		logger.Logger.WithField("candidate", c.String()).Info("Adding candidate")
 		receiver.pendingCandidates = append(receiver.pendingCandidates, &webrtc.ICECandidateInit{Candidate: c.ToJSON().Candidate})
 	})
 
 	status := coordinator.StatusBusy
 
 	for status == coordinator.StatusBusy {
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterPath)
+		curPath := fmt.Sprintf(UrlFormat, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HttpRegisterPath)
 		resp, err := http.Post(curPath,
-			TYPE_APP_JSON,
+			TypeAppJson,
 			bytes.NewReader([]byte{}))
 		if err != nil {
-			fmt.Fprint(os.Stderr, err)
 			return err
 		}
 		err = json.NewDecoder(resp.Body).Decode(&status)
 		if err != nil {
-			fmt.Fprint(os.Stderr, err)
 			return err
 		}
 
-		fmt.Printf("RoleStatus is %v, Sleeping for %v\n", status, BUSY_TIMEOUT)
+		logger.Logger.WithFields(logrus.Fields{
+			"status":   status,
+			"duration": BusyTimeout,
+		}).Info("status received, sleeping")
+		time.Sleep(BusyTimeout)
 	}
 
 	err := receiver.resolveStatus(status)
 
 	if err != nil {
-		fmt.Fprint(os.Stderr, err)
 		return err
 	}
 
-	fmt.Printf("Peer with role %v done\n", status)
+	logger.Logger.WithField("status", status).Info("Peer finished SDP exchange")
 	return nil
 }

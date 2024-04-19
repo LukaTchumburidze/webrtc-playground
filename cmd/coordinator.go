@@ -18,7 +18,7 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
-	"log"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/operator/coordinator"
 )
 
@@ -38,12 +38,12 @@ var coordinatorCmd = &cobra.Command{
 	Short: "Starts coordinator node which has very basic capabilities to connect 2 last connected peers with each other",
 	Long:  `Starts coordinator node which has very basic capabilities to connect 2 last connected peers with each other`,
 	Run: func(cmd *cobra.Command, args []string) {
-		log.Println("Executing coordinator command")
-		coordNode, err := coordinator.New(coordinatorConfig.Port)
+		logger.Logger.Info("Executing coordinator command")
+		coordinatorNode, err := coordinator.New(coordinatorConfig.Port)
 		if err != nil {
-			panic(err)
+			logger.Logger.Fatal(err)
 		}
-		coordNode.Listen()
+		coordinatorNode.Listen()
 	},
 }
 

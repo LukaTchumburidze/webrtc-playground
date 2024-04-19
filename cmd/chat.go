@@ -17,8 +17,7 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
-	"fmt"
-	"log"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/worker"
 
 	"github.com/spf13/cobra"
@@ -36,10 +35,10 @@ var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Offers basic chat functionality with connected peer",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Starting chat worker")
+		logger.Logger.Info("Starting chat worker")
 		worker, err := worker.NewChatWorker(chatPeerCmdConfig.Username)
 		if err != nil {
-			log.Fatal(err)
+			logger.Logger.Fatal(err)
 		}
 		workerCmdRun(chatPeerCmdConfig.PeerCmdConfig, worker)
 	},

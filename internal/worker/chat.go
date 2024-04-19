@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"webrtc-playground/internal/logger"
 )
 
 const (
@@ -19,7 +20,6 @@ type ChatWorker struct {
 
 func (receiver *ChatWorker) ProducePayload() ([]byte, error) {
 	input, err := receiver.reader.ReadString('\n')
-
 	if err == io.EOF {
 		return nil, ErrFinish
 	}
@@ -28,8 +28,7 @@ func (receiver *ChatWorker) ProducePayload() ([]byte, error) {
 }
 
 func (receiver *ChatWorker) ConsumePayload(bytes []byte) error {
-	fmt.Printf("%v\n", string(bytes))
-
+	logger.Logger.Info(string(bytes))
 	return nil
 }
 

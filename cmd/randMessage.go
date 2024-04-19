@@ -17,8 +17,7 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
-	"fmt"
-	"log"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/worker"
 
 	"github.com/spf13/cobra"
@@ -36,10 +35,10 @@ var randMessageCmd = &cobra.Command{
 	Use:   "randMessage",
 	Short: "Generates arbitrary number of random messages",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("Starting random message worker")
+		logger.Logger.Info("Starting random message worker")
 		worker, err := worker.NewRandMessageWorker(randMessageCmdConfig.NOfMessages)
 		if err != nil {
-			log.Fatal(err)
+			logger.Logger.Fatal(err)
 		}
 		workerCmdRun(randMessageCmdConfig.PeerCmdConfig, worker)
 	},

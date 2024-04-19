@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	"log"
 	"time"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/operator/peer"
 	"webrtc-playground/internal/worker"
 )
@@ -10,21 +10,21 @@ import (
 const peerTimeout = 5 * time.Second
 
 func workerCmdRun(peerConfig PeerCmdConfig, worker worker.Worker) {
-	log.Printf("Peer has been started, waiting for %v\n", peerTimeout)
+	logger.Logger.WithField("duration", peerTimeout).Info("Peer has been started, waiting")
 	time.Sleep(peerTimeout)
 
 	peerNode, err := peer.New(peerConfig.CoordinatorAddress, peerCmdConfig.CoordinatorPort, &worker)
 	if err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal(err)
 	}
 
 	if err := peerNode.InitConnection(); err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal(err)
 	}
 
 	if err := peerNode.Await(); err != nil {
-		log.Fatal(err)
+		logger.Logger.Fatal(err)
 	}
 
-	log.Printf("Peer Node completed successfully\n")
+	logger.Logger.Info("Peer Node completed successfully")
 }

@@ -8,7 +8,7 @@ const (
 	WorkerFS           = "fs"
 )
 
-var ErrFinish = errors.New("worker finished")
+var ErrFinish = errors.New("worker finished incorrectly")
 
 type Worker interface {
 	ProducePayload() ([]byte, error)

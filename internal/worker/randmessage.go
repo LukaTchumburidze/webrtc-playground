@@ -2,15 +2,19 @@ package worker
 
 import (
 	"errors"
-	"fmt"
 	"github.com/pion/randutil"
+	"github.com/sirupsen/logrus"
 	"time"
+	"webrtc-playground/internal/logger"
 )
 
 const (
-	DEFAULT_N_OF_MESSAGES   = 5
-	MSG_LENGTH              = 30
-	DELAY_FOR_PRODUCING_MSG = 5 * time.Second
+	MsgLength            = 30
+	DelayForProducingMsg = 5 * time.Second
+)
+
+var (
+	ErrInvalidNumberOfMessages = errors.New("number of messages should be positive")
 )
 
 func RandSeq(n int) string {
@@ -31,24 +35,27 @@ func (receiver *RandMessageWorker) ProducePayload() ([]byte, error) {
 	if receiver.msgCnt == receiver.nOfMessages {
 		return nil, ErrFinish
 	}
-	time.Sleep(DELAY_FOR_PRODUCING_MSG)
+	time.Sleep(DelayForProducingMsg)
 
-	b := []byte(RandSeq(MSG_LENGTH))
-	fmt.Printf("Produced %v %v\n", receiver.msgCnt, string(b))
+	b := []byte(RandSeq(MsgLength))
+	logger.Logger.WithFields(logrus.Fields{
+		"cnt":     receiver.msgCnt,
+		"payload": string(b),
+	}).Info("Produced Payload")
 
 	receiver.msgCnt++
 	return b, nil
 }
 
 func (receiver *RandMessageWorker) ConsumePayload(bytes []byte) error {
-	fmt.Printf("Consumed %v\n", string(bytes))
+	logger.Logger.WithField("payload", string(bytes)).Info("Consumed Payload")
 
 	return nil
 }
 
 func NewRandMessageWorker(nOfMessages uint) (*RandMessageWorker, error) {
 	if nOfMessages <= 0 {
-		return nil, errors.New("number of messages should be positive")
+		return nil, ErrInvalidNumberOfMessages
 	}
 
 	return &RandMessageWorker{

@@ -3,14 +3,16 @@ package coordinator
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/pion/randutil"
 	"github.com/pion/webrtc/v3"
+	"github.com/sirupsen/logrus"
 	"io"
 	"net/http"
-	"os"
 	"sync"
 	"time"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/model"
 )
 
@@ -18,8 +20,7 @@ const (
 	StatusBusy = model.RoleStatus("BUSY")
 	RoleOffer  = model.RoleStatus("OFFER")
 	RoleAnswer = model.RoleStatus("ANSWER")
-)
-const (
+
 	HTTPICEPath          = "/ice"
 	HttpRegisterPath     = "/register"
 	HttpSDPPath          = "/sdp/offer"
@@ -27,6 +28,10 @@ const (
 	HttpRegisterDonePath = "/register/done"
 
 	MatchingTimeout = 60 * time.Second
+)
+
+var (
+	ErrNoSDPToSend = errors.New("there's no offer SDP to send")
 )
 
 const IDLength = 5
@@ -69,18 +74,18 @@ func (receiver *Coordinator) handleRegister() {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
-		fmt.Printf("Registration received from %v\n", r.RemoteAddr)
+		logger.Logger.WithField("address", r.RemoteAddr).Info("Registration received")
 
 		if receiver.isBusy {
 			buff := bytes.Buffer{}
 			err := json.NewEncoder(&buff).Encode(model.RoleStatus(StatusBusy))
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while encoding role")
 				return
 			}
 			_, err = w.Write(buff.Bytes())
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while writing response")
 				return
 			}
 
@@ -91,12 +96,12 @@ func (receiver *Coordinator) handleRegister() {
 			buff := bytes.Buffer{}
 			err := json.NewEncoder(&buff).Encode(model.RoleStatus(RoleOffer))
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while encoding role")
 				return
 			}
 			_, err = w.Write(buff.Bytes())
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while writing response")
 				return
 			}
 
@@ -105,12 +110,12 @@ func (receiver *Coordinator) handleRegister() {
 			buff := bytes.Buffer{}
 			err := json.NewEncoder(&buff).Encode(model.RoleStatus(RoleAnswer))
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while encoding role")
 				return
 			}
 			_, err = w.Write(buff.Bytes())
 			if err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while writing response")
 				return
 			}
 
@@ -132,7 +137,7 @@ func (receiver *Coordinator) handleRegister() {
 		receiver.connectedPeers[offerSDP.ID] = answerSDP.ID
 		receiver.connectedPeers[answerSDP.ID] = offerSDP.ID
 
-		fmt.Printf("Registration done received from %v\n", r.RemoteAddr)
+		logger.Logger.WithField("address", r.RemoteAddr).Info("Registration done received")
 		receiver.doneCnt++
 		if receiver.doneCnt == 2 {
 			receiver.doneCnt = 0
@@ -148,7 +153,7 @@ func (receiver *Coordinator) resetBusyState() {
 	if len(receiver.offers) == oldLen &&
 		(receiver.offers[oldLen-1] == nil ||
 			receiver.answers[oldLen-1] == nil) {
-		fmt.Printf("After timeout both peers weren't registered, removing last 2 records from offers/answers\n")
+		logger.Logger.Info("After timeout both peers weren't registered, removing last 2 records from offers/answers")
 
 		receiver.peersMux.Lock()
 
@@ -165,35 +170,38 @@ func (receiver *Coordinator) handleSdp() {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
-		fmt.Printf("Received %v on SDP_OFFER endpoint for %v\n", r.Method, r.RemoteAddr)
+		logger.Logger.WithFields(logrus.Fields{
+			"method":  r.Method,
+			"address": r.RemoteAddr,
+		}).Info("Received request on SDP_OFFER endpoint")
 
 		switch r.Method {
 		case http.MethodPost:
 			// Offer giving us SDP
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("error while decoding SDP")
 				return
 			}
 			sdpPayload := &model.SDPPayload{
 				ID:  RandSeq(IDLength),
 				SDP: &sdp,
 			}
-			fmt.Printf("Received SDP from offer peer %v\n", sdpPayload.ID)
+			logger.Logger.WithField("id", sdpPayload.ID).Info("Received SDP from offer peer")
 			receiver.offers[len(receiver.offers)-1] = sdpPayload
 
 		case http.MethodGet:
 			// Answer asking for offer's SDP
 			if len(receiver.offers) == 0 {
-				fmt.Fprint(os.Stderr, "So there's no offer SDP to send\n")
+				logger.Logger.WithError(ErrNoSDPToSend).Error("error while choosing error SDP")
 				return
 			}
 			sdpPayload := receiver.offers[len(receiver.offers)-1]
 			if err := json.NewEncoder(w).Encode(sdpPayload); err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("could not encode SDP")
 				return
 			}
-			fmt.Printf("Sending SDPPayload to answer peer %v\n", sdpPayload.ID)
+			logger.Logger.WithField("id", sdpPayload.ID).Info("Sending SDPPayload to answer peer")
 		}
 	})
 
@@ -201,14 +209,17 @@ func (receiver *Coordinator) handleSdp() {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
-		fmt.Printf("Received %v on SDP_ANSWER endpoint for %v\n", r.Method, r.RemoteAddr)
+		logger.Logger.WithFields(logrus.Fields{
+			"method":  r.Method,
+			"address": r.RemoteAddr,
+		}).Info("Received request on SDP_ANSWER endpoint")
 
 		switch r.Method {
 		case http.MethodPost:
 			// Answer giving us SDP
 			sdp := webrtc.SessionDescription{}
 			if err := json.NewDecoder(r.Body).Decode(&sdp); err != nil {
-				fmt.Fprint(os.Stderr, err)
+				logger.Logger.WithError(err).Error("Could not decode SDP")
 				return
 			}
 			sdpPayload := &model.SDPPayload{
@@ -216,7 +227,7 @@ func (receiver *Coordinator) handleSdp() {
 				ID:  RandSeq(IDLength),
 			}
 
-			fmt.Printf("Received SDP from answer peer %v\n", sdpPayload.ID)
+			logger.Logger.WithField("id", sdpPayload.ID).Info("Received SDP from answer peer")
 			receiver.answers[len(receiver.answers)-1] = sdpPayload
 		case http.MethodGet:
 			// Offer asking for Answer's SDP
@@ -227,7 +238,7 @@ func (receiver *Coordinator) handleSdp() {
 			if err := json.NewEncoder(w).Encode(sdpPayload); err != nil {
 				return
 			}
-			fmt.Printf("Sending SDP to offer peer %v\n", sdpPayload.ID)
+			logger.Logger.WithField("id", sdpPayload.ID).Info("Sending SDP to offer peer")
 		}
 	})
 
@@ -235,7 +246,10 @@ func (receiver *Coordinator) handleSdp() {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 
-		fmt.Printf("Received %v on ICEInit endpoint for %v\n", r.Method, r.RemoteAddr)
+		logger.Logger.WithFields(logrus.Fields{
+			"method":  r.Method,
+			"address": r.RemoteAddr,
+		}).Info("Received request on ICEInit endpoint")
 
 		switch r.Method {
 		case http.MethodPost:
@@ -243,7 +257,7 @@ func (receiver *Coordinator) handleSdp() {
 
 			b, err := io.ReadAll(r.Body)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "error while extracting ICEInit for id %v\n", id)
+				logger.Logger.WithError(err).WithField("id", id).Error("Could not read request body")
 				return
 			}
 			r.Body.Close()
@@ -252,30 +266,39 @@ func (receiver *Coordinator) handleSdp() {
 
 			err = json.Unmarshal(b, &iceCandidates)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "unmarshaling for id %v\n", id)
+				logger.Logger.WithError(err).WithField("id", id).Error("Could not unmarshal ICE candidates")
+				return
 			}
 
 			receiver.peerICECandidates[id] = iceCandidates
 
-			fmt.Printf("Received %v ICE Candidates from %v\n", len(iceCandidates), id)
+			logger.Logger.WithFields(logrus.Fields{
+				"id":              id,
+				"n_of_candidates": len(iceCandidates),
+			}).Info("Received ICE candidates")
 		case http.MethodGet:
 			id := r.URL.Query().Get("id")
 
 			connectedId := receiver.connectedPeers[id]
 			if err := json.NewEncoder(w).Encode(receiver.peerICECandidates[connectedId]); err != nil {
-				fmt.Fprintf(os.Stderr, "marshalling for id %v\n", id)
+				logger.Logger.WithError(err).WithField("id", id).Error("Could not encode ICE candidates")
 				return
 			}
 
-			fmt.Printf("peer %v is connected to peer %v, sent connected peer's candidates", id, connectedId)
-
-			fmt.Printf("Sent %v ICE Candidates to %v\n", len(receiver.peerICECandidates[connectedId]), connectedId)
+			logger.Logger.WithFields(logrus.Fields{
+				"id":              id,
+				"n_of_candidates": len(receiver.peerICECandidates[connectedId]),
+			}).Info("ICE candidates has been sent")
+			logger.Logger.WithFields(logrus.Fields{
+				"first_id":  id,
+				"second_id": connectedId,
+			}).Info("peers ICE candidates has been exchanged")
 		}
 	})
 }
 
 func (receiver *Coordinator) Listen() {
-	fmt.Printf("Coordinator has started listening\n")
+	logger.Logger.Info("Coordinator has started listening")
 	receiver.handleRegister()
 	receiver.handleSdp()
 	http.ListenAndServe(fmt.Sprintf(":%d", receiver.port), nil)
