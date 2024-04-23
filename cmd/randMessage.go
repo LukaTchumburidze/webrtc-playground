@@ -17,18 +17,14 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
+	"webrtc-playground/config"
 	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/worker"
 
 	"github.com/spf13/cobra"
 )
 
-var randMessageCmdConfig = RandMessagePeerCmdConfig{}
-
-type RandMessagePeerCmdConfig struct {
-	PeerCmdConfig
-	NOfMessages uint
-}
+var randMessageCmdConfig = config.RandMessagePeerCmdConfig{}
 
 // randMessageCmd represents the randMessage command
 var randMessageCmd = &cobra.Command{
@@ -36,6 +32,7 @@ var randMessageCmd = &cobra.Command{
 	Short: "Generates arbitrary number of random messages",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger.Logger.Info("Starting random message worker")
+		randMessageCmdConfig.PeerCmdConfig = peerCmdConfig
 		worker, err := worker.NewRandMessageWorker(randMessageCmdConfig.NOfMessages)
 		if err != nil {
 			logger.Logger.Fatal(err)

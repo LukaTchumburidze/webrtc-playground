@@ -17,19 +17,14 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
+	"webrtc-playground/config"
 	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/worker"
 
 	"github.com/spf13/cobra"
 )
 
-var fileSystemPeerCmdConfig = FileSystemPeerCmdConfig{}
-
-type FileSystemPeerCmdConfig struct {
-	PeerCmdConfig
-	Directory string
-	Recursive bool
-}
+var fileSystemPeerCmdConfig = config.FileSystemPeerCmdConfig{}
 
 // fsCmd represents the fs command
 var fsCmd = &cobra.Command{
@@ -37,6 +32,7 @@ var fsCmd = &cobra.Command{
 	Short: "Offers file system synchronization tool on specified directory among peers",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger.Logger.Info("Starting file system worker")
+		fileSystemPeerCmdConfig.PeerCmdConfig = peerCmdConfig
 		worker, err := worker.NewFSWorker(fileSystemPeerCmdConfig.Directory, fileSystemPeerCmdConfig.Recursive)
 		if err != nil {
 			logger.Logger.Fatal(err)

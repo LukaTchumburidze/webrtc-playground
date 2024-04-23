@@ -18,6 +18,7 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+	"webrtc-playground/config"
 	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/operator/coordinator"
 )
@@ -26,11 +27,7 @@ const (
 	coordinatorPortDefaultValue uint16 = 3939
 )
 
-var coordinatorConfig = CoordinatorConfig{}
-
-type CoordinatorConfig struct {
-	Port uint16
-}
+var coordinatorConfig = config.CoordinatorConfig{}
 
 // coordinatorCmd represents the coordinator command
 var coordinatorCmd = &cobra.Command{

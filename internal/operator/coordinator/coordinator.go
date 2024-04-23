@@ -23,7 +23,7 @@ const (
 
 	HTTPICEPath          = "/ice"
 	HttpRegisterPath     = "/register"
-	HttpSDPPath          = "/sdp/offer"
+	HttpSDPOfferPath     = "/sdp/offer"
 	HttpSDPAnswerPath    = "/sdp/answer"
 	HttpRegisterDonePath = "/register/done"
 
@@ -137,7 +137,10 @@ func (receiver *Coordinator) handleRegister() {
 		receiver.connectedPeers[offerSDP.ID] = answerSDP.ID
 		receiver.connectedPeers[answerSDP.ID] = offerSDP.ID
 
-		logger.Logger.WithField("address", r.RemoteAddr).Info("Registration done received")
+		logger.Logger.WithFields(logrus.Fields{
+			"offer_peer":  offerSDP.ID,
+			"answer_peer": answerSDP.ID,
+		}).Info("Registration done")
 		receiver.doneCnt++
 		if receiver.doneCnt == 2 {
 			receiver.doneCnt = 0
@@ -166,7 +169,7 @@ func (receiver *Coordinator) resetBusyState() {
 }
 
 func (receiver *Coordinator) handleSdp() {
-	http.HandleFunc(HttpSDPPath, func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc(HttpSDPOfferPath, func(w http.ResponseWriter, r *http.Request) {
 		receiver.peersMux.Lock()
 		defer receiver.peersMux.Unlock()
 

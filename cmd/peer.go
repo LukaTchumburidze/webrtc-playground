@@ -18,15 +18,10 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+	"webrtc-playground/config"
 )
 
-var peerCmdConfig = PeerCmdConfig{}
-
-type PeerCmdConfig struct {
-	SDPExchangeMethod  string
-	CoordinatorAddress string
-	CoordinatorPort    uint16
-}
+var peerCmdConfig = config.PeerCmdConfig{}
 
 // peerCmd represents the peer command
 var peerCmd = &cobra.Command{
@@ -41,7 +36,7 @@ to proceed work specified with one of the subcommands`,
 func init() {
 	rootCmd.AddCommand(peerCmd)
 
-	peerCmd.PersistentFlags().StringVar(&peerCmdConfig.SDPExchangeMethod, "sdp_exchange_method", "irc", "Which sdp exhange mechanism to use either coordinator or irc")
+	peerCmd.PersistentFlags().StringVar(&peerCmdConfig.SDPExchangeMethod, "sdp_exchange_method", "irc", "Which sdp exhange mechanism to use either http or irc")
 	peerCmd.PersistentFlags().StringVar(&peerCmdConfig.CoordinatorAddress, "coordinator_address", "", "address of coordinator node (used when sdp-exchange-method=coordinator)")
 	peerCmd.PersistentFlags().Uint16Var(&peerCmdConfig.CoordinatorPort, "coordinator_port", coordinatorPortDefaultValue, "port of coordinator node (used when sdp-exchange-method=coordinator)")
 }

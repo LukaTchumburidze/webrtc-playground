@@ -17,18 +17,14 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 package cmd
 
 import (
+	"webrtc-playground/config"
 	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/worker"
 
 	"github.com/spf13/cobra"
 )
 
-var chatPeerCmdConfig = ChatPeerCmdConfig{}
-
-type ChatPeerCmdConfig struct {
-	PeerCmdConfig
-	Username string
-}
+var chatPeerCmdConfig = config.ChatPeerCmdConfig{}
 
 // chatCmd represents the chat command
 var chatCmd = &cobra.Command{
@@ -36,6 +32,7 @@ var chatCmd = &cobra.Command{
 	Short: "Offers basic chat functionality with connected peer",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger.Logger.Info("Starting chat worker")
+		chatPeerCmdConfig.PeerCmdConfig = peerCmdConfig
 		worker, err := worker.NewChatWorker(chatPeerCmdConfig.Username)
 		if err != nil {
 			logger.Logger.Fatal(err)
