@@ -1,147 +1,107 @@
 package peer
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/pion/webrtc/v3"
-	"net/http"
-	"os"
 	"sync"
 	"time"
-	"webrtc-playground/internal/model"
+	"webrtc-playground/config"
+	"webrtc-playground/internal/logger"
 	"webrtc-playground/internal/operator/coordinator"
 	"webrtc-playground/internal/worker"
 )
 
 const (
-	BUSY_TIMEOUT        = 20 * time.Second
-	DELAY_AFTER_OFFER   = 5 * time.Second
-	TYPE_APP_JSON       = "application/json; charset=utf-8"
-	URL_FORMAT          = "http://%s:%d%s"
-	GOOGLE_STUN_ADDRESS = "stun:stun.l.google.com:19302"
+	busyTimeout          = 20 * time.Second
+	delayAfterOffer      = 5 * time.Second
+	TypeAppJson          = "application/json; charset=utf-8"
+	coordinatorUrlFormat = "http://%s:%d%s"
+	googleStunAddress    = "stun:stun.l.google.com:19302"
+
+	iceGetDelay  = 5 * time.Second
+	iceSendDelay = 5 * time.Second
 )
-const (
-	ICE_GET_DELAY  = 5 * time.Second
-	ICE_SEND_DELAY = 5 * time.Second
+
+var (
+	ErrCandidateIdNotSet     = errors.New("id is not set, can't send candidate")
+	ErrNilWorker             = errors.New("nil worker has been passed to peer")
+	ErrConnectionStateFailed = errors.New("peer Connection has gone to failed")
+	ErrCantGetICECandidates  = errors.New("can't get ICE candidates")
 )
 
-func (receiver *Peer) signalCandidates() error {
-	if receiver.id == "" {
-		panic("id is not set, can't send candidate")
+type (
+	peerConnector interface {
+		connectPeers(peer *Peer) error
 	}
 
-	fmt.Printf("Sending %v candidates to coordinator\n", len(receiver.pendingCandidates))
+	Peer struct {
+		connector         peerConnector
+		PeerConnection    *webrtc.PeerConnection
+		waitChannel       chan error
+		pendingCandidates []*webrtc.ICECandidateInit
+		candidatesMux     sync.Mutex
+		sentMsgCnt        int
+		receivedMsgCnt    int
+		id                string
 
-	receiver.candidatesMux.Lock()
-	defer receiver.candidatesMux.Unlock()
-
-	b, err := json.Marshal(receiver.pendingCandidates)
-	if err != nil {
-		return err
+		worker *worker.Worker
 	}
+)
 
-	curPath := fmt.Sprintf("http://%v:%v/ice?id=%v", receiver.CoordinatorAddress, receiver.CoordinatorPort, receiver.id)
-
-	resp, err := http.Post(curPath, // nolint:noctx
-		"application/json; charset=utf-8", bytes.NewReader(b))
-	if err != nil {
-		return err
-	}
-
-	return resp.Body.Close()
-}
-
-func (receiver *Peer) getICECandidates() error {
-	receiver.candidatesMux.Lock()
-	defer receiver.candidatesMux.Unlock()
-
-	fmt.Printf("Started getting ICEInit Candidates from coordinator at %v:%v\n", receiver.CoordinatorAddress, receiver.CoordinatorPort)
-	for try := 0; try < 1; try++ {
-		curPath := fmt.Sprintf("http://%v:%v/ice?id=%v", receiver.CoordinatorAddress, receiver.CoordinatorPort, receiver.id)
-		resp, err := http.Get(curPath)
-
-		if err != nil {
-			return err
-		}
-
-		var iceCandidates []webrtc.ICECandidateInit
-		if err := json.NewDecoder(resp.Body).Decode(&iceCandidates); err != nil {
-			return err
-		}
-		resp.Body.Close()
-
-		for _, iceCandidate := range iceCandidates {
-			err = receiver.PeerConnection.AddICECandidate(iceCandidate)
-			if err != nil {
-				return err
-			}
-		}
-
-		fmt.Printf("Received %v candidates from coordinator\n", len(iceCandidates))
-	}
-	fmt.Printf("Finished getting ICEInit candidates\n")
-
-	return nil
-}
-
-type Peer struct {
-	CoordinatorAddress string
-	CoordinatorPort    int
-	PeerConnection     *webrtc.PeerConnection
-	waitChannel        chan error
-	pendingCandidates  []*webrtc.ICECandidateInit
-	candidatesMux      sync.Mutex
-	sentMsgCnt         int
-	receivedMsgCnt     int
-	id                 string
-
-	worker *worker.Worker
-}
-
-func New(coordinatorAddress string, coordinatorPort int, worker *worker.Worker) (peer *Peer, err error) {
+func NewPeer(cmdConfig config.PeerCmdConfig, worker *worker.Worker) (peer *Peer, err error) {
 	if worker == nil {
-		return nil, errors.New("nil worker has been passed to peer")
+		return nil, ErrNilWorker
 	}
 
-	config := webrtc.Configuration{
+	webrtcCfg := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{
 			{
-				URLs: []string{GOOGLE_STUN_ADDRESS},
+				URLs: []string{googleStunAddress},
 			},
 		},
 	}
-	peerConnection, err := webrtc.NewPeerConnection(config)
+	peerConnection, err := webrtc.NewPeerConnection(webrtcCfg)
 	if err != nil {
 		return
 	}
 
+	// Check which connector to use
+	var connector peerConnector
+	if cmdConfig.SDPExchangeMethod == "http" {
+		connector = httpPeerConnector{
+			coordinatorAddress: cmdConfig.CoordinatorAddress,
+			coordinatorPort:    cmdConfig.CoordinatorPort,
+		}
+	} else {
+		connector = ircPeerConnector{
+			// TODO: initialize this as per irc cmd config
+		}
+	}
+
 	peer = &Peer{
-		CoordinatorAddress: coordinatorAddress,
-		CoordinatorPort:    coordinatorPort,
-		PeerConnection:     peerConnection,
-		waitChannel:        make(chan error),
-		pendingCandidates:  make([]*webrtc.ICECandidateInit, 0),
-		worker:             worker,
+		connector:         connector,
+		PeerConnection:    peerConnection,
+		waitChannel:       make(chan error),
+		pendingCandidates: make([]*webrtc.ICECandidateInit, 0),
+		worker:            worker,
 	}
 
 	// Set the handler for Peer connection state
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
-		fmt.Printf("Peer Connection State has changed: %s\n", s.String())
+		logger.Logger.WithField("state", s.String()).Info("Peer Connection State has changed")
 
 		if s == webrtc.PeerConnectionStateFailed {
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICEInit Restart.
 			// Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
 			// Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
 
-			peer.stop(fmt.Errorf("Peer Connection has gone to failed exiting\n"))
+			peer.stop(ErrConnectionStateFailed)
 		}
 
 		//TODO: Currently connection state disconnected is being regarded as valid exit, don't think this is correct
 		if s == webrtc.PeerConnectionStateClosed || s == webrtc.PeerConnectionStateDisconnected {
-			fmt.Printf("Valid terminal state change, exitting \n")
+			logger.Logger.Info("Valid terminal state change, exiting")
 			peer.Stop()
 		}
 	})
@@ -150,7 +110,7 @@ func New(coordinatorAddress string, coordinatorPort int, worker *worker.Worker) 
 }
 
 func (receiver *Peer) Await() error {
-	fmt.Printf("Waiting to stop\n")
+	logger.Logger.Info("Waiting to stop")
 	select {
 	case err := <-receiver.waitChannel:
 		return err
@@ -165,237 +125,58 @@ func (receiver *Peer) Stop() {
 	receiver.stop(nil)
 }
 
-func (receiver *Peer) sendOfferSDP() error {
-	// SEND offer role
-	fmt.Printf("Sending Offer SDP\n")
-
-	offer, err := receiver.PeerConnection.CreateOffer(nil)
-	if err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(offer)
-	if err != nil {
-		return err
-	}
-
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH)
-	_, err = http.Post(curPath,
-		TYPE_APP_JSON,
-		bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-
-	if err = receiver.PeerConnection.SetLocalDescription(offer); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (receiver *Peer) getAnswerSDPID() (string, error) {
-	// RECEIVE answer connection
-	fmt.Printf("Getting answer SDP\n")
-
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH)
-	resp, err := http.Get(curPath)
-	if err != nil {
-		fmt.Fprint(os.Stderr, err)
-		return "", err
-	}
-	var answerPayload model.SDPPayload
-	err = json.NewDecoder(resp.Body).Decode(&answerPayload)
-	if err := resp.Body.Close(); err != nil {
-		fmt.Fprint(os.Stderr, err)
-		return "", err
-	}
-	err = receiver.PeerConnection.SetRemoteDescription(*answerPayload.Sdp)
-	if err != nil {
-		fmt.Fprint(os.Stderr, err)
-		return "", err
-	}
-
-	return answerPayload.ID, nil
-}
-
 func (receiver *Peer) setupDataChannel() error {
 	dataChannel, err := receiver.PeerConnection.CreateDataChannel(coordinator.RandSeq(5), nil)
 	if err != nil {
 		return err
 	}
-
-	fmt.Printf("Created DataChannel %v\n", dataChannel.Label())
+	logger.Logger.WithField("label", dataChannel.Label()).Info("Created DataChannel")
 
 	dataChannel.OnOpen(func() {
 		var err error
-		for err != worker.ErrFinish {
+		for err == nil {
 			b, err := (*receiver.worker).ProducePayload()
 			if err != nil {
-				if err == worker.ErrFinish {
+				if errors.Is(err, worker.ErrFinish) {
 					break
 				} else {
+					// Could not identify error, we should panic
 					panic(err)
 				}
 			}
 			err = dataChannel.Send(b)
 			if err != nil {
+				// Could not send for some reason, we should panic
 				panic(err)
-				break
 			}
 		}
-		fmt.Printf("Worker finished producing payload, closing DataChannel\n")
+		logger.Logger.Info("Worker finished producing payload, closing DataChannel")
 		dataChannel.Close()
 
 		err = receiver.PeerConnection.Close()
 		if err != nil {
-			fmt.Errorf("%v\n", err)
+			logger.Logger.WithError(err).Error("error on peer connection close")
 		}
 	})
 
 	// Current version basically is just one DataChannel, if it gets closed, peers should finish work
 	dataChannel.OnClose(func() {
-		fmt.Printf("DataChannel was closed, closing peer connection")
+		logger.Logger.Info("DataChannel was closed, closing peer connection")
 		receiver.PeerConnection.Close()
 	})
 
 	receiver.PeerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
-		fmt.Printf("OnDataChannel %v\n", channel.Label())
+		logger.Logger.WithField("label", channel.Label()).Info("OnDataChannel")
 		// Register text message handling
 		channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 			b := msg.Data
 			err = (*receiver.worker).ConsumePayload(b)
 			if err != nil {
+				// Could not consume payload properly, since there is no further mechanism we should panic
 				panic(err)
 			}
 		})
 	})
-
-	return nil
-}
-
-func (receiver *Peer) resolveOffer() error {
-	if err := receiver.sendOfferSDP(); err != nil {
-		return err
-	}
-
-	fmt.Printf("Sleeping after offer\n")
-	time.Sleep(DELAY_AFTER_OFFER)
-
-	id, err := receiver.getAnswerSDPID()
-	if err != nil {
-		return err
-	}
-
-	receiver.id = id
-
-	return nil
-}
-
-func (receiver *Peer) getOfferSDPID() (string, error) {
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_OFFER_PATH)
-
-	resp, err := http.Get(curPath)
-	if err != nil {
-		return "", err
-	}
-
-	var offerPayload model.SDPPayload
-	err = json.NewDecoder(resp.Body).Decode(&offerPayload)
-	if err := resp.Body.Close(); err != nil {
-		return "", err
-	}
-	err = receiver.PeerConnection.SetRemoteDescription(*offerPayload.Sdp)
-	if err != nil {
-		return "", err
-	}
-
-	return offerPayload.ID, nil
-}
-
-func (receiver *Peer) sendAnswerSDP() error {
-	answerSdp, err := receiver.PeerConnection.CreateAnswer(nil)
-	if err != nil {
-		return err
-	}
-
-	err = receiver.PeerConnection.SetLocalDescription(answerSdp)
-	if err != nil {
-		return err
-	}
-
-	payload, err := json.Marshal(answerSdp)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Sending answer SDP\n")
-	curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_SDP_ANSWER_PATH)
-	_, err = http.Post(curPath,
-		TYPE_APP_JSON,
-		bytes.NewReader(payload))
-	if err != nil {
-		fmt.Fprint(os.Stderr, err)
-		return err
-	}
-
-	return nil
-}
-
-func (receiver *Peer) resolveAnswer() error {
-	fmt.Printf("Getting offer SDP\n")
-
-	id, err := receiver.getOfferSDPID()
-	if err != nil {
-		return err
-	}
-
-	if err = receiver.sendAnswerSDP(); err != nil {
-		return err
-	}
-
-	receiver.id = id
-	return nil
-}
-
-func (receiver *Peer) resolveStatus(status model.RoleStatus) error {
-	if err := receiver.setupDataChannel(); err != nil {
-		return nil
-	}
-
-	switch status {
-	case coordinator.ROLE_OFFER:
-		err := receiver.resolveOffer()
-		if err != nil {
-			return err
-		}
-
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_DONE_PATH)
-		_, err = http.Post(curPath,
-			TYPE_APP_JSON,
-			bytes.NewReader([]byte{}))
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("Registration done\n")
-	case coordinator.ROLE_ANSWER:
-		err := receiver.resolveAnswer()
-		if err != nil {
-			return err
-		}
-	}
-
-	time.Sleep(ICE_SEND_DELAY)
-	err := receiver.signalCandidates()
-	if err != nil {
-		return nil
-	}
-	time.Sleep(ICE_GET_DELAY)
-	err = receiver.getICECandidates()
-	if err != nil {
-		return nil
-	}
 
 	return nil
 }
@@ -409,38 +190,12 @@ func (receiver *Peer) InitConnection() error {
 		receiver.candidatesMux.Lock()
 		defer receiver.candidatesMux.Unlock()
 
-		fmt.Printf("Adding candidate %v\n", c.String())
-
+		logger.Logger.WithField("candidate", c.String()).Info("Adding candidate")
 		receiver.pendingCandidates = append(receiver.pendingCandidates, &webrtc.ICECandidateInit{Candidate: c.ToJSON().Candidate})
 	})
 
-	status := coordinator.STATUS_BUSY
-
-	for status == coordinator.STATUS_BUSY {
-		curPath := fmt.Sprintf(URL_FORMAT, receiver.CoordinatorAddress, receiver.CoordinatorPort, coordinator.HTTP_REGISTER_PATH)
-		resp, err := http.Post(curPath,
-			TYPE_APP_JSON,
-			bytes.NewReader([]byte{}))
-		if err != nil {
-			fmt.Fprint(os.Stderr, err)
-			return err
-		}
-		err = json.NewDecoder(resp.Body).Decode(&status)
-		if err != nil {
-			fmt.Fprint(os.Stderr, err)
-			return err
-		}
-
-		fmt.Printf("RoleStatus is %v, Sleeping for %v\n", status, BUSY_TIMEOUT)
-	}
-
-	err := receiver.resolveStatus(status)
-
-	if err != nil {
-		fmt.Fprint(os.Stderr, err)
+	if err := receiver.setupDataChannel(); err != nil {
 		return err
 	}
-
-	fmt.Printf("Peer with role %v done\n", status)
-	return nil
+	return receiver.connector.connectPeers(receiver)
 }

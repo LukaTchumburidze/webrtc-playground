@@ -1,4 +1,4 @@
-docker compose build
+docker compose build --no-cache
 docker compose up -d
 
 function on_exit {
@@ -8,6 +8,6 @@ function on_exit {
 
 trap on_exit EXIT
 
-TIMEOUT=30
+TIMEOUT=60
 timeout $TIMEOUT docker compose logs -f | grep -q "answer  | "
 timeout $TIMEOUT docker compose logs -f | grep -q "offer   | "

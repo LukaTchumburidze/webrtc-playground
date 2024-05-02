@@ -1,11 +1,10 @@
-version: '3'
 # Initial config, 3 nodes, 2 peers and 1 coordinator
 # Peers are in different networks, coordinator is in both networks
 services:
   coordinator:
     container_name: coordinator
     build: .
-    command: ./cmd -node_type COORD -coordinator_port 12345
+    command: ./webrtc-playground coordinator --port=12345
     networks:
       - coord_to_first
       - coord_to_second
@@ -14,7 +13,7 @@ services:
       - coordinator
     container_name: first_peer
     build: .
-    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345
+    command: ./webrtc-playground peer  randMessage --sdp_exchange_method=http --coordinator_address=coordinator --coordinator_port=12345
     networks:
       - coord_to_first
 
@@ -23,7 +22,7 @@ services:
     depends_on:
       - first_peer
     build: .
-    command: ./cmd -node_type PEER -coordinator_address coordinator -coordinator_port 12345
+    command: ./webrtc-playground peer randMessage --sdp_exchange_method=http --coordinator_address=coordinator --coordinator_port=12345
     networks:
       - coord_to_second
 

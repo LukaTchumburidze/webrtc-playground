@@ -7,16 +7,16 @@ import (
 type RoleStatus string
 
 type RolePayload struct {
-	Status RoleStatus
 	ID     string
+	Status RoleStatus
 }
 
 type SDPPayload struct {
-	Sdp *webrtc.SessionDescription
 	ID  string
+	SDP *webrtc.SessionDescription
 }
 
 type ICEPayload struct {
-	ICEInit *webrtc.ICECandidateInit
 	ID      string
+	ICEInit *webrtc.ICECandidateInit
 }
