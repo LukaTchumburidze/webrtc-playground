@@ -2,6 +2,7 @@ package peer
 
 import (
 	"errors"
+	"github.com/pion/sctp"
 	"github.com/pion/webrtc/v3"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ var (
 type (
 	peerConnector interface {
 		connectPeers(peer *Peer) error
+		stop()
 	}
 
 	Peer struct {
@@ -73,9 +75,7 @@ func NewPeer(cmdConfig config.PeerCmdConfig, worker *worker.Worker) (peer *Peer,
 			coordinatorPort:    cmdConfig.CoordinatorPort,
 		}
 	} else {
-		connector = ircPeerConnector{
-			// TODO: initialize this as per irc cmd config
-		}
+		connector = newIRCPeerConnector()
 	}
 
 	peer = &Peer{
@@ -90,6 +90,10 @@ func NewPeer(cmdConfig config.PeerCmdConfig, worker *worker.Worker) (peer *Peer,
 	// This will notify you when the peer has connected/disconnected
 	peerConnection.OnConnectionStateChange(func(s webrtc.PeerConnectionState) {
 		logger.Logger.WithField("state", s.String()).Info("Peer Connection State has changed")
+
+		if s == webrtc.PeerConnectionStateConnected {
+			connector.stop()
+		}
 
 		if s == webrtc.PeerConnectionStateFailed {
 			// Await until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICEInit Restart.
@@ -118,6 +122,7 @@ func (receiver *Peer) Await() error {
 }
 
 func (receiver *Peer) stop(err error) {
+	receiver.connector.stop()
 	receiver.waitChannel <- err
 }
 
@@ -146,14 +151,18 @@ func (receiver *Peer) setupDataChannel() error {
 			}
 			err = dataChannel.Send(b)
 			if err != nil {
-				// Could not send for some reason, we should panic
-				panic(err)
+				if errors.Is(err, sctp.ErrStreamClosed) {
+					continue
+				}
+				logger.Logger.WithError(err).Error("Error sending payload")
+				receiver.stop(err)
+				return
 			}
 		}
 		logger.Logger.Info("Worker finished producing payload, closing DataChannel")
 		dataChannel.Close()
 
-		err = receiver.PeerConnection.Close()
+		receiver.Stop()
 		if err != nil {
 			logger.Logger.WithError(err).Error("error on peer connection close")
 		}

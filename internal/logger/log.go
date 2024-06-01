@@ -5,3 +5,7 @@ import (
 )
 
 var Logger = logrus.New()
+
+func init() {
+	Logger.SetLevel(logrus.DebugLevel)
+}

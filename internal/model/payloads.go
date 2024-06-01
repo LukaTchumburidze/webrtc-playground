@@ -12,11 +12,11 @@ type RolePayload struct {
 }
 
 type SDPPayload struct {
-	ID  string
-	SDP *webrtc.SessionDescription
+	ID  string                     `json:"id"`
+	SDP *webrtc.SessionDescription `json:"sdp"`
 }
 
 type ICEPayload struct {
-	ID      string
-	ICEInit *webrtc.ICECandidateInit
+	ID      string                  `json:"id"`
+	ICEInit webrtc.ICECandidateInit `json:"ice_init"`
 }

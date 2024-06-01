@@ -1,0 +1,24 @@
+# Initial config, 2 nodes, 2 peers and 1 coordinator
+# Peers are in different networks, sdp exchange through
+services:
+  first_peer:
+    container_name: first_peer
+    build: .
+    command: ./webrtc-playground peer randMessage --sdp_exchange_method=irc
+    networks:
+      - first
+
+  second_peer:
+    container_name: second_peer
+    depends_on:
+      - first_peer
+    build: .
+    command: ./webrtc-playground peer randMessage --sdp_exchange_method=irc
+    networks:
+      - second
+
+networks:
+  first:
+    driver: bridge
+  second:
+    driver: bridge

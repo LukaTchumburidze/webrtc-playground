@@ -73,6 +73,10 @@ func (c httpPeerConnector) getICECandidates(id string) ([]*webrtc.ICECandidateIn
 	return nil, ErrCantGetICECandidates
 }
 
+func (c httpPeerConnector) stop() {
+
+}
+
 func (c httpPeerConnector) connectPeers(peer *Peer) error {
 	status := coordinator.StatusBusy
 
